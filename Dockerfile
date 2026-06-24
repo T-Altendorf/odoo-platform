@@ -33,15 +33,16 @@ COPY . /mnt/extra-addons
 #   - the repo-root requirements.txt (own / custom extras)
 # Set INSTALL_VENDOR_REQS=0 to skip vendor reqs for a slim, fast build.
 ARG INSTALL_VENDOR_REQS=1
-RUN set -eux; \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    set -eux; \
     if [ "$INSTALL_VENDOR_REQS" = "1" ]; then \
         find /mnt/extra-addons/third_party_addons/_vendor \
              /mnt/extra-addons/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
-             -exec pip install --no-cache-dir --break-system-packages -r {} \; ; \
+             -exec pip install --break-system-packages -r {} \; ; \
     fi; \
     if [ -f /mnt/extra-addons/requirements.txt ]; then \
-        pip install --no-cache-dir --break-system-packages -r /mnt/extra-addons/requirements.txt; \
+        pip install --break-system-packages -r /mnt/extra-addons/requirements.txt; \
     fi
 
 COPY docker/odoo.conf.template /etc/odoo/odoo.conf.template
