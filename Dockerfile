@@ -24,18 +24,23 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_ROOT_USER_ACTION=ignore \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# The whole authoritative repo (custom modules + third_party_addons incl.
-# populated _vendor submodules and _selected symlinks) lands here.
-COPY . /mnt/extra-addons
+# Create the target directory
+RUN mkdir -p /mnt/extra-addons
+
+# --- CACHE OPTIMIZATION: COPY DEPENDENCIES FIRST ---
+# By copying ONLY the files needed for requirements first, Docker will cache the 
+# pip install step. Changing your custom module code will no longer bust this cache.
+# (The [t] and [s] wildcards prevent the build from crashing if these files/folders 
+# don't exist in a specific environment).
+COPY requirements.tx[t] /mnt/extra-addons/
+COPY third_party_addon[s] /mnt/extra-addons/third_party_addons/
 
 # Install python requirements.
-#   - every third_party_addons/{_vendor,_static_vendor}/*/requirements.txt
-#   - the repo-root requirements.txt (own / custom extras)
 # Set INSTALL_VENDOR_REQS=0 to skip vendor reqs for a slim, fast build.
 ARG INSTALL_VENDOR_REQS=1
 RUN --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
-    if [ "$INSTALL_VENDOR_REQS" = "1" ]; then \
+    if [ "$INSTALL_VENDOR_REQS" = "1" ] && [ -d /mnt/extra-addons/third_party_addons ]; then \
         find /mnt/extra-addons/third_party_addons/_vendor \
              /mnt/extra-addons/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
@@ -44,6 +49,11 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     if [ -f /mnt/extra-addons/requirements.txt ]; then \
         pip install --break-system-packages -r /mnt/extra-addons/requirements.txt; \
     fi
+
+# --- COPY THE REST OF THE CODE ---
+# Now we copy the rest of the authoritative repo (custom modules, etc.). 
+# Changes here only invalidate this layer and below, saving massive time.
+COPY . /mnt/extra-addons
 
 COPY docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY docker/entrypoint.sh /usr/local/bin/gemini-entrypoint.sh
