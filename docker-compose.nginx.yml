@@ -1,0 +1,21 @@
+# Self-managed reverse proxy overlay (alternative to Dokploy/Traefik).
+# Use it for prod WITHOUT the dev override:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d
+#
+# Only nginx publishes host ports; the odoo container stays internal (`expose`).
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - odoo
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      # - "443:443"            # uncomment when terminating TLS here
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      # - /etc/letsencrypt:/etc/letsencrypt:ro   # reuse existing certbot certs

@@ -1,0 +1,98 @@
+# Dev helpers. `make help` for the list.
+COMPOSE ?= docker compose
+SERVICE ?= odoo
+ODOO_RC ?= /etc/odoo/odoo.conf
+OWN_MODULES ?= consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself
+
+.DEFAULT_GOAL := help
+
+.PHONY: help
+help: ## Show this help
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: env
+env: ## Create .env from .env.example if missing
+	@test -f .env || (cp .env.example .env && echo "created .env — edit it")
+
+.PHONY: build
+build: ## Build the Odoo image
+	$(COMPOSE) build
+
+.PHONY: up
+up: env ## Start the full stack (dev: ports + reload via override)
+	$(COMPOSE) up -d --build
+
+.PHONY: debug
+debug: env ## Start with debugpy and wait for the IDE to attach (port 5678)
+	DEBUG=1 DEBUGPY_WAIT=1 $(COMPOSE) up --build
+
+.PHONY: down
+down: ## Stop the stack
+	$(COMPOSE) down
+
+.PHONY: restart
+restart: ## Restart the odoo service
+	$(COMPOSE) restart $(SERVICE)
+
+.PHONY: logs
+logs: ## Tail odoo logs
+	$(COMPOSE) logs -f $(SERVICE)
+
+.PHONY: shell
+shell: ## Bash inside the running odoo container
+	$(COMPOSE) exec $(SERVICE) bash
+
+.PHONY: odoo-shell
+odoo-shell: ## Odoo interactive shell (python). db=NAME to target (default DB_NAME)
+	$(COMPOSE) exec $(SERVICE) odoo shell -c $(ODOO_RC) -d $${db:-$${DB_NAME:-odoo}} --no-http
+
+.PHONY: psql
+psql: ## psql into a database. db=NAME (default DB_NAME)
+	$(COMPOSE) exec db psql -U $${DB_USER:-odoo} -d $${db:-$${DB_NAME:-odoo}}
+
+.PHONY: init
+init: ## First-time install of own modules on a fresh DB. db=NAME (default DB_NAME)
+	$(COMPOSE) run --rm $(SERVICE) odoo -c $(ODOO_RC) -d $${db:-$${DB_NAME:-odoo}} \
+		-i base,$(OWN_MODULES) --stop-after-init
+
+.PHONY: upgrade
+upgrade: ## Upgrade own modules. m=mod1,mod2 to target; db=NAME
+	$(COMPOSE) exec $(SERVICE) odoo -c $(ODOO_RC) -d $${db:-$${DB_NAME:-odoo}} \
+		-u $${m:-$(OWN_MODULES)} --stop-after-init
+
+# --- Database management (works regardless of list_db) -----------------------
+.PHONY: dblist
+dblist: ## List all databases
+	$(COMPOSE) exec db psql -U $${DB_USER:-odoo} -d postgres -c "\l"
+
+.PHONY: dbcreate
+dbcreate: ## Create + init a new DB: make dbcreate db=test
+	$(COMPOSE) run --rm $(SERVICE) odoo -c $(ODOO_RC) -d $${db:?set db=name} \
+		-i base,$(OWN_MODULES) --stop-after-init
+
+.PHONY: dbtest
+dbtest: ## Clone production DB into a fresh test copy: make dbtest [from=odoo to=test]
+	$(COMPOSE) exec db sh -c 'dropdb -U $${DB_USER:-odoo} --if-exists $${to:-test} && \
+		createdb -U $${DB_USER:-odoo} -T $${from:-odoo} $${to:-test}'
+	@echo "Cloned $${from:-odoo} -> $${to:-test}. (Neutralize crons/mail in the test DB!)"
+
+.PHONY: dbdrop
+dbdrop: ## Drop a DB: make dbdrop db=test
+	$(COMPOSE) exec db dropdb -U $${DB_USER:-odoo} --if-exists $${db:?set db=name}
+
+.PHONY: dbbackup
+dbbackup: ## Dump a DB to ./backups: make dbbackup db=odoo
+	@mkdir -p backups
+	$(COMPOSE) exec -T db pg_dump -U $${DB_USER:-odoo} -Fc $${db:?set db=name} \
+		> backups/$${db}-$$(date +%Y%m%d-%H%M%S).dump
+	@echo "wrote backups/$${db}-*.dump"
+
+.PHONY: dbrestore
+dbrestore: ## Restore: make dbrestore db=test file=backups/odoo-x.dump
+	$(COMPOSE) exec -T db pg_restore -U $${DB_USER:-odoo} -d $${db:?set db=name} \
+		--clean --if-exists < $${file:?set file=path}
+
+.PHONY: submodules
+submodules: ## Pull latest 18.0 for all _vendor submodules
+	git submodule update --remote third_party_addons/_vendor

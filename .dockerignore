@@ -1,0 +1,43 @@
+# === Git (645MB savings) ===
+.git
+**/.git
+**/.gitignore
+**/.gitmodules
+**/.github
+
+# === Python bytecode ===
+**/__pycache__
+**/*.py[cod]
+
+# === OS / IDE ===
+**/.DS_Store
+.vscode
+.idea
+
+# === Vendor: strip test suites and CI config (Odoo never loads these) ===
+**/tests/
+**/test/
+**/.travis.yml
+**/.pre-commit-config.yaml
+**/.pylintrc
+
+# === Vendor: strip translation catalogs and pot templates ===
+**/i18n/
+**/*.pot
+
+# === Vendor: strip description screenshots (marketing, not runtime) ===
+**/static/description/
+
+# === Docs not needed at runtime ===
+**/doc/
+**/docs/
+**/*.md
+.weblate.json
+
+# === Local dev artifacts ===
+.env
+*.log
+docker-compose.override.yml
+docker-compose.nginx.yml
+deploy/
+Makefile

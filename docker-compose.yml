@@ -1,0 +1,95 @@
+# Production / Dokploy stack: Odoo 18 (this repo) + PostgreSQL.
+# Local dev conveniences (published ports, live code mount, reload) live in
+# docker-compose.override.yml, which the docker CLI auto-merges locally but
+# Dokploy does NOT use.
+#
+# All tunables come from .env (see .env.example).
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-odoo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-odoo}
+      POSTGRES_DB: postgres            # maintenance db; Odoo creates ${DB_NAME}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-odoo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  odoo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ODOO_IMAGE: ${ODOO_IMAGE:-odoo:18.0}
+        INSTALL_VENDOR_REQS: ${INSTALL_VENDOR_REQS:-1}
+    image: ${IMAGE_NAME:-gemini-odoo18}:${IMAGE_TAG:-latest}
+    pull_policy: build          # local build image — never try to pull from a registry
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-odoo}
+      DB_PASSWORD: ${DB_PASSWORD:-odoo}
+      DB_NAME: ${DB_NAME:-odoo}
+      DBFILTER: ${DBFILTER:-}
+      LIST_DB: ${LIST_DB:-False}
+      ADMIN_PASSWD: ${ADMIN_PASSWD:-admin}
+      HTTP_PORT: ${HTTP_PORT:-8069}
+      GEVENT_PORT: ${GEVENT_PORT:-8072}
+      PROXY_MODE: ${PROXY_MODE:-True}
+      WORKERS: ${WORKERS:-2}
+      MAX_CRON_THREADS: ${MAX_CRON_THREADS:-1}
+      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-2147483648}
+      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-8589934592}
+      LIMIT_REQUEST: ${LIMIT_REQUEST:-1073741824}
+      LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-3600}
+      LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-7200}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      INSTALL_MODULES: ${INSTALL_MODULES:-}
+      UPGRADE_MODULES: ${UPGRADE_MODULES:-consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself}
+      ODOO_ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:-admin}
+      UPGRADE_DB: ${UPGRADE_DB:-}
+      DEBUG: ${DEBUG:-0}
+      DEBUGPY_PORT: ${DEBUGPY_PORT:-5678}
+      DEBUGPY_WAIT: ${DEBUGPY_WAIT:-}
+    volumes:
+      - odoo-data:/var/lib/odoo
+    expose:
+      - "${HTTP_PORT:-8069}"
+      - "${GEVENT_PORT:-8072}"
+    # --- Dokploy / Traefik domain routing ------------------------------------
+    # Easiest: leave these off and set the domain in the Dokploy UI
+    #   (service: odoo, port: 8069). For workers>0, websockets need a 2nd route.
+    # Or drive everything from ${DOMAIN} by uncommenting + joining the Traefik
+    # network (see DEPLOY.md):
+    #
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.odoo.rule=Host(`${DOMAIN}`)"
+    #   - "traefik.http.routers.odoo.entrypoints=websecure"
+    #   - "traefik.http.routers.odoo.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.odoo.loadbalancer.server.port=${HTTP_PORT:-8069}"
+    #   - "traefik.http.routers.odoo-ws.rule=Host(`${DOMAIN}`) && PathPrefix(`/websocket`)"
+    #   - "traefik.http.routers.odoo-ws.entrypoints=websecure"
+    #   - "traefik.http.routers.odoo-ws.tls.certresolver=letsencrypt"
+    #   - "traefik.http.services.odoo-ws.loadbalancer.server.port=${GEVENT_PORT:-8072}"
+    # networks: [default, dokploy-network]
+
+volumes:
+  db-data:
+  odoo-data:
+
+# Uncomment when wiring Traefik labels above on Dokploy:
+# networks:
+#   dokploy-network:
+#     external: true

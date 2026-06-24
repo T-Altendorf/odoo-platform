@@ -1,0 +1,27 @@
+# Local development overlay. Auto-merged by `docker compose` on your machine;
+# ignored by Dokploy (it deploys docker-compose.yml only).
+#
+#   * publishes Odoo + Postgres ports to the host
+#   * bind-mounts the repo over /mnt/extra-addons -> edit code, no rebuild
+#   * runs single-process with live reload of python/xml/qweb
+#   * no auto-upgrade on boot (do it explicitly via `make upgrade`)
+
+services:
+  db:
+    ports:
+      - "${DB_EXPOSE_PORT:-5432}:5432"
+
+  odoo:
+    ports:
+      - "${HTTP_PORT:-8069}:${HTTP_PORT:-8069}"
+      - "${GEVENT_PORT:-8072}:${GEVENT_PORT:-8072}"
+      - "${DEBUGPY_PORT:-5678}:${DEBUGPY_PORT:-5678}"   # debugger attach (dev only)
+    environment:
+      WORKERS: 0
+      PROXY_MODE: "False"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      UPGRADE_MODULES: ""        # don't auto-upgrade on every dev restart
+    volumes:
+      - ./:/mnt/extra-addons
+      - odoo-data:/var/lib/odoo
+    command: ["--dev=reload,qweb,xml"]

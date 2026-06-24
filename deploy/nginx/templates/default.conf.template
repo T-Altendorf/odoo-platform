@@ -1,0 +1,54 @@
+# Reverse proxy for the Dockerized Odoo — the container-native version of a
+# classic host nginx vhost. Upstreams are the compose SERVICE name + the
+# INTERNAL ports (no host ports published on the odoo container).
+#
+# The official nginx image only substitutes ${DOMAIN} (an env var); nginx's own
+# $host / $http_upgrade / ... are left untouched.
+
+upstream odoo      { server odoo:8069; }
+upstream odoochat  { server odoo:8072; }
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ""      close;
+}
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    proxy_read_timeout 720s;
+    proxy_connect_timeout 720s;
+    proxy_send_timeout 720s;
+    client_max_body_size 1000M;
+
+    # Websocket -> gevent port
+    location /websocket {
+        proxy_pass http://odoochat;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Everything else -> http port
+    location / {
+        proxy_pass http://odoo;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_redirect off;
+    }
+
+    gzip on;
+    gzip_types text/css text/plain text/xml application/xml application/json application/javascript;
+}
+
+# TLS: terminate here by mounting your certs (see docker-compose.nginx.yml) and
+# adding a `listen 443 ssl;` server block, OR (recommended) let Dokploy/Traefik
+# terminate TLS in front and keep this plain HTTP.
