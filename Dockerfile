@@ -32,8 +32,7 @@ ARG INSTALL_VENDOR_REQS=1
 
 # --- CACHE & PATH OPTIMIZATION: BIND MOUNT ---
 # We use a read-only bind mount to expose the context files directly to pip.
-# Docker caches this step entirely based on the contents of the requirements.txt files.
-# Changing your custom Odoo modules (.py, .xml) will NOT invalidate this cache.
+# Added `-I` (--ignore-installed) to bypass Debian's typing-extensions locking.
 RUN --mount=type=bind,target=/tmp/src \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
@@ -41,10 +40,10 @@ RUN --mount=type=bind,target=/tmp/src \
         find /tmp/src/third_party_addons/_vendor \
              /tmp/src/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
-             -exec pip install --break-system-packages -r {} \; ; \
+             -exec pip install --break-system-packages -I -r {} \; ; \
     fi; \
     if [ -f /tmp/src/requirements.txt ]; then \
-        pip install --break-system-packages -r /tmp/src/requirements.txt; \
+        pip install --break-system-packages -I -r /tmp/src/requirements.txt; \
     fi
 
 # Now copy the whole repository for runtime. 
