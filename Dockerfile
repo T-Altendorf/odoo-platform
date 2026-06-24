@@ -31,19 +31,22 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
 ARG INSTALL_VENDOR_REQS=1
 
 # --- CACHE & PATH OPTIMIZATION: BIND MOUNT ---
-# We use a read-only bind mount to expose the context files directly to pip.
-# Added `-I` (--ignore-installed) to bypass Debian's typing-extensions locking.
 RUN --mount=type=bind,target=/tmp/src \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
+    # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL 
+    # BEFORE running the vendor requirements, preventing the GEN_EMAIL crash.
+    pip install --break-system-packages --ignore-installed typing-extensions pyOpenSSL; \
     if [ "$INSTALL_VENDOR_REQS" = "1" ] && [ -d /tmp/src/third_party_addons ]; then \
         find /tmp/src/third_party_addons/_vendor \
              /tmp/src/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
-             -exec pip install --break-system-packages -I -r {} \; ; \
+             # Removed the dangerous -I flag here
+             -exec pip install --break-system-packages -r {} \; ; \
     fi; \
     if [ -f /tmp/src/requirements.txt ]; then \
-        pip install --break-system-packages -I -r /tmp/src/requirements.txt; \
+        # Removed the dangerous -I flag here
+        pip install --break-system-packages -r /tmp/src/requirements.txt; \
     fi
 
 # Now copy the whole repository for runtime. 
