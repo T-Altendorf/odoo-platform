@@ -30,8 +30,13 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
 # Set INSTALL_VENDOR_REQS=0 to skip vendor reqs for a slim, fast build.
 ARG INSTALL_VENDOR_REQS=1
 
-# --- CACHE & PATH OPTIMIZATION: BIND MOUNT ---
-RUN --mount=type=bind,target=/tmp/src \
+# --- CACHE & PATH OPTIMIZATION: TARGETED BIND MOUNTS ---
+# Bind ONLY the dependency sources (not the whole context) so editing our own
+# modules can't bust this layer. The pip install only re-runs when the root
+# requirements.txt or a vendor module changes.
+RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
+    --mount=type=bind,source=third_party_addons/_vendor,target=/tmp/src/third_party_addons/_vendor \
+    --mount=type=bind,source=third_party_addons/_static_vendor,target=/tmp/src/third_party_addons/_static_vendor \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
     # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL 
