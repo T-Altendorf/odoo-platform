@@ -8,11 +8,18 @@ set -euo pipefail
 : "${DB_PORT:=5432}"
 : "${DB_USER:=odoo}"
 : "${DB_PASSWORD:=odoo}"
-: "${DB_NAME:=odoo}"
+: "${DB_NAME:=False}"
 : "${DB_MAXCONN:=64}"
 : "${LIST_DB:=False}"
-# Empty/unset -> single-db filter derived from DB_NAME.
-if [ -z "${DBFILTER:-}" ]; then DBFILTER="^${DB_NAME}\$"; fi
+# Empty/unset -> derive from DB_NAME. If DB_NAME=False (multi-db), default to
+# .* so the dbfilter_from_header module or Odoo's own selector can handle it.
+if [ -z "${DBFILTER:-}" ]; then
+    if [ "$DB_NAME" = "False" ]; then
+        DBFILTER=".*"
+    else
+        DBFILTER="^${DB_NAME}\$"
+    fi
+fi
 
 : "${ADMIN_PASSWD:=admin}"
 : "${DATA_DIR:=/var/lib/odoo}"
@@ -37,14 +44,13 @@ if [ -z "${DBFILTER:-}" ]; then DBFILTER="^${DB_NAME}\$"; fi
 
 : "${ODOO_RC:=/var/lib/odoo/odoo.conf}"
 
-# Module automation. UPGRADE_MODULES runs `-u` on every boot (our own modules,
-# pinned via submodule commits -> safe to keep in sync). INSTALL_MODULES runs
-# `-i` (use once on a fresh database, then clear it).
 : "${UPGRADE_MODULES:=consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself}"
 : "${INSTALL_MODULES:=}"
-# Which DB the -i/-u steps target. Defaults to DB_NAME, but for header-based
-# multi-tenant (DB_NAME=False + dbfilter_from_header) point it at a real db.
-: "${UPGRADE_DB:=${DB_NAME}}"
+# Comma-separated list of databases to run -i/-u on. Empty or "False" = skip.
+# Missing dbs are skipped with a warning (never auto-created).
+# To init a fresh db from scratch, use INIT_DB=<name> (one-shot, then clear).
+: "${UPGRADE_DB:=}"
+: "${INIT_DB:=}"
 
 # Debugger (debugpy). DEBUG=1 -> run Odoo under debugpy on DEBUGPY_PORT.
 # DEBUGPY_WAIT=1 -> block until the IDE attaches.
@@ -76,32 +82,49 @@ db_exists() {
         -tAc "SELECT 1 FROM pg_database WHERE datname='$1'" postgres 2>/dev/null | grep -q 1
 }
 
-run_step() {  # <flag> <modules>
-    local flag="$1" mods="$2"
-    if [ -n "$mods" ] && [ "$UPGRADE_DB" != "False" ]; then
-        echo "[entrypoint] odoo ${flag} ${mods} (db=${UPGRADE_DB})"
-        odoo -c "$ODOO_RC" -d "$UPGRADE_DB" "$flag" "$mods" --stop-after-init
-    fi
-}
-
-if [ "$UPGRADE_DB" != "False" ]; then
-    if ! db_exists "$UPGRADE_DB"; then
-        echo "[entrypoint] fresh DB '$UPGRADE_DB' — initialising with base + own modules"
-        install_list="base"
-        [ -n "${UPGRADE_MODULES}" ] && install_list="${install_list},${UPGRADE_MODULES}"
-        [ -n "${INSTALL_MODULES}" ] && install_list="${install_list},${INSTALL_MODULES}"
-        odoo -c "$ODOO_RC" -d "$UPGRADE_DB" -i "$install_list" --stop-after-init
-        # Set admin password via ORM so it's properly hashed.
-        odoo shell -c "$ODOO_RC" -d "$UPGRADE_DB" --no-http <<PYEOF
+# INIT_DB: one-shot fresh database creation (set once, then clear).
+if [ -n "$INIT_DB" ] && [ "$INIT_DB" != "False" ]; then
+    IFS=',' read -ra _init_dbs <<< "$INIT_DB"
+    for _db in "${_init_dbs[@]}"; do
+        _db="$(echo "$_db" | xargs)"  # trim whitespace
+        [ -z "$_db" ] && continue
+        if db_exists "$_db"; then
+            echo "[entrypoint] INIT_DB: '$_db' already exists — skipping"
+        else
+            echo "[entrypoint] INIT_DB: creating '$_db' with base + modules"
+            install_list="base"
+            [ -n "${UPGRADE_MODULES}" ] && install_list="${install_list},${UPGRADE_MODULES}"
+            [ -n "${INSTALL_MODULES}" ] && install_list="${install_list},${INSTALL_MODULES}"
+            odoo -c "$ODOO_RC" -d "$_db" -i "$install_list" --stop-after-init
+            odoo shell -c "$ODOO_RC" -d "$_db" --no-http <<PYEOF
 admin = env['res.users'].browse(2)
 admin.password = '$ODOO_ADMIN_PASSWORD'
 env.cr.commit()
 print(f"[entrypoint] admin password set for {admin.login}")
 PYEOF
-    else
-        run_step -i "${INSTALL_MODULES}"
-        run_step -u "${UPGRADE_MODULES}"
-    fi
+        fi
+    done
+fi
+
+# UPGRADE_DB: upgrade existing databases. Missing dbs are skipped.
+if [ -n "$UPGRADE_DB" ] && [ "$UPGRADE_DB" != "False" ]; then
+    IFS=',' read -ra _upgrade_dbs <<< "$UPGRADE_DB"
+    for _db in "${_upgrade_dbs[@]}"; do
+        _db="$(echo "$_db" | xargs)"
+        [ -z "$_db" ] && continue
+        if ! db_exists "$_db"; then
+            echo "[entrypoint] UPGRADE_DB: '$_db' not found — skipping (use INIT_DB to create)"
+            continue
+        fi
+        if [ -n "${INSTALL_MODULES}" ]; then
+            echo "[entrypoint] odoo -i ${INSTALL_MODULES} (db=${_db})"
+            odoo -c "$ODOO_RC" -d "$_db" -i "${INSTALL_MODULES}" --stop-after-init
+        fi
+        if [ -n "${UPGRADE_MODULES}" ]; then
+            echo "[entrypoint] odoo -u ${UPGRADE_MODULES} (db=${_db})"
+            odoo -c "$ODOO_RC" -d "$_db" -u "${UPGRADE_MODULES}" --stop-after-init
+        fi
+    done
 fi
 
 # --- Serve -------------------------------------------------------------------

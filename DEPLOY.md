@@ -30,10 +30,11 @@ make up                       # build + start (publishes 8069/8072, live reload)
 make logs
 ```
 
-First run on a fresh database — install the modules once:
+First run on a fresh database — create and init it once:
 
 ```bash
-make init                     # installs own modules
+INIT_DB=odoo make up          # creates db "odoo" with base + own modules
+# then clear INIT_DB from .env so it doesn't re-check every boot
 # open http://localhost:8069  (master pw = ADMIN_PASSWD)
 ```
 
@@ -79,14 +80,16 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
    compose file `docker-compose.yml`. Enable **recursive submodule** clone so
    `third_party_addons/_vendor` is populated.
 2. **Environment** → paste your `.env` values (at minimum `ADMIN_PASSWD`,
-   `DB_PASSWORD`; set `INSTALL_MODULES=...` on the very first deploy, then clear).
+   `DB_PASSWORD`). For a fresh database set `INIT_DB=<name>` on the first
+   deploy, then clear it. Set `UPGRADE_DB=<name>` for ongoing upgrades.
 3. **Domain** — two options:
    - *UI (simplest):* add a domain mapped to service `odoo`, port `8069`.
    - *Compose labels:* set `DOMAIN` in env, uncomment the Traefik `labels` +
      `networks` blocks in `docker-compose.yml`. The second router sends
      `/websocket` to `GEVENT_PORT` (needed when `WORKERS>0`).
 4. **Deploy.** On boot the entrypoint renders the config, waits for Postgres,
-   runs `-i $INSTALL_MODULES` then `-u $UPGRADE_MODULES`, and serves.
+   creates any `INIT_DB` databases, upgrades every `UPGRADE_DB` database, and
+   serves. Missing dbs in `UPGRADE_DB` are skipped (never auto-created).
 
 `PROXY_MODE=True` is required behind Traefik. Volumes `db-data` and `odoo-data`
 (filestore + sessions) persist across redeploys.
@@ -120,8 +123,8 @@ Two ways to run the proxy:
   or keep it HTTP behind Dokploy. Don't combine with the dev override.
 
 Multi-tenant: your nginx sends `X-Odoo-dbfilter ^UUs.*` (the `dbfilter_from_header`
-module). For that, set `DB_NAME=False` and `UPGRADE_DB=<a-real-tenant-db>` so the
-boot-time `-u` still runs.
+module). `DB_NAME=False` is the default. List your tenant dbs in `UPGRADE_DB`
+(e.g. `UPGRADE_DB=UUs,UUs_Test`) so boot-time `-u` runs on each.
 
 ### Databases, the manager, and a test/staging instance
 
@@ -135,9 +138,10 @@ Recommended layout — **prod stays locked, a second app is your admin/test cons
 | | prod app | test / admin app |
 |---|---|---|
 | `DOMAIN` | odoo.example.com | test.example.com |
-| `DB_NAME` | `odoo` | `test` |
-| `DBFILTER` | `^odoo$` | `.*` (manager lists every DB) |
+| `DB_NAME` | `False` | `False` |
+| `DBFILTER` | `^prod$` (or via header) | `.*` (manager lists every DB) |
 | `LIST_DB` | `False` (clean, no manager) | `True` (DB manager enabled) |
+| `UPGRADE_DB` | `prod` | `test` |
 | `WORKERS` | `2` | `0` (cheap) |
 
 Prod users land on `odoo` with no picker and no manager exposed. The test app's
@@ -178,10 +182,27 @@ deliberately with `make submodules && git add third_party_addons/_vendor`.
 
 ## How module automation works
 
-`UPGRADE_MODULES` (default = the five own modules) runs `-u` on every start —
-safe because their code is version-controlled here. `INSTALL_MODULES` runs `-i`
-(use once per fresh DB). Both are skipped when `DB_NAME=False` (multi-tenant);
-upgrade those tenants manually.
+The entrypoint manages databases via two env vars:
+
+- **`INIT_DB`** — one-shot fresh database creation. Comma-separated list of db
+  names. Each db gets `base` + `UPGRADE_MODULES` + `INSTALL_MODULES` installed,
+  and the admin password set to `ODOO_ADMIN_PASSWORD`. Already-existing dbs are
+  skipped. **Set it, deploy once, then clear it.**
+- **`UPGRADE_DB`** — comma-separated list of dbs to run `-i` / `-u` on every
+  boot. Missing dbs are **skipped with a warning** (never auto-created). Empty
+  or `"False"` = skip all upgrades (fast restart).
+
+`UPGRADE_MODULES` (default = the five own modules) runs `-u` — safe because
+their code is version-controlled here. `INSTALL_MODULES` runs `-i` (use once
+per fresh DB, then clear).
+
+Examples:
+```bash
+UPGRADE_DB=UUs                   # upgrade one db every boot
+UPGRADE_DB=UUs,UUs_Test          # upgrade multiple dbs
+UPGRADE_DB=                      # skip upgrades entirely (fast restart)
+INIT_DB=NewClient                # create a fresh db (one-shot, then clear)
+```
 
 ## Python requirements
 The image installs, at build time:
