@@ -25,9 +25,6 @@
 **/i18n/
 **/*.pot
 
-# === Vendor: strip description screenshots (marketing, not runtime) ===
-**/static/description/
-
 # === Docs not needed at runtime ===
 **/doc/
 **/docs/
