@@ -16,6 +16,11 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - db-data:/var/lib/postgresql/data
+    # TEMP: raw-TCP exposure for one-off remote restore. REMOVE after restore +
+    # redeploy. Postgres can't go through Traefik/HTTPS. Set DB_EXTERNAL_PORT in
+    # .env (e.g. 5433); restrict by firewall to your IP while open.
+    ports:
+      - "${DB_EXTERNAL_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-odoo}"]
       interval: 5s
