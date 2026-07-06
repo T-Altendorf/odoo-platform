@@ -35,8 +35,8 @@ ARG INSTALL_VENDOR_REQS=1
 # modules can't bust this layer. The pip install only re-runs when the root
 # requirements.txt or a vendor module changes.
 RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
-    --mount=type=bind,source=third_party_addons/_vendor,target=/tmp/src/third_party_addons/_vendor \
-    --mount=type=bind,source=third_party_addons/_static_vendor,target=/tmp/src/third_party_addons/_static_vendor \
+    --mount=type=bind,source=src/third_party_addons/_vendor,target=/tmp/src/third_party_addons/_vendor \
+    --mount=type=bind,source=src/third_party_addons/_static_vendor,target=/tmp/src/third_party_addons/_static_vendor \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
     # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL 
@@ -54,9 +54,9 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
         pip install --break-system-packages -r /tmp/src/requirements.txt; \
     fi
 
-# Now copy the whole repository for runtime. 
+# Now copy the src tree for runtime.
 # Modifying your code will only hit this layer and below!
-COPY . /mnt/extra-addons
+COPY src /mnt/extra-addons
 
 COPY docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY docker/entrypoint.sh /usr/local/bin/gemini-entrypoint.sh

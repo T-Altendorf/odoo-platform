@@ -176,7 +176,7 @@ Pin the base image by digest in `.env`:
 ODOO_IMAGE=odoo@sha256:<digest>
 ```
 Vendor module versions are pinned by the `_vendor` submodule commits. Bump them
-deliberately with `make submodules && git add third_party_addons/_vendor`.
+deliberately with `make submodules && git add src/third_party_addons/_vendor`.
 
 ---
 

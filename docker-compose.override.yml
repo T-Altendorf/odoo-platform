@@ -22,6 +22,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       UPGRADE_MODULES: ""        # don't auto-upgrade on every dev restart
     volumes:
-      - ./:/mnt/extra-addons
+      - ./src:/mnt/extra-addons
       - odoo-data:/var/lib/odoo
     command: ["--dev=reload,qweb,xml"]
