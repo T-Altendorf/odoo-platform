@@ -1,14 +1,23 @@
-# Dev helpers. `make help` for the list.
+# odoo-platform dev/ops targets. Consumed from a PRODUCT repo root via its
+# thin Makefile:
+#
+#   OWN_MODULES ?= my_module_a,my_module_b
+#   include platform/Makefile
+#
+# All targets run from the product root. `make help` for the list.
 COMPOSE ?= docker compose
+# Dev stack = prod compose + the dev override (ports, live mount, reload).
+COMPOSE_DEV ?= $(COMPOSE) -f docker-compose.yml -f platform/docker-compose.override.yml
 SERVICE ?= odoo
 ODOO_RC ?= /etc/odoo/odoo.conf
-OWN_MODULES ?= consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself
+# Product-specific: set OWN_MODULES in the product Makefile before the include.
+OWN_MODULES ?=
 
 .DEFAULT_GOAL := help
 
 .PHONY: help
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: env
@@ -21,11 +30,11 @@ build: ## Build the Odoo image
 
 .PHONY: up
 up: env ## Start the full stack (dev: ports + reload via override)
-	$(COMPOSE) up -d --build
+	$(COMPOSE_DEV) up -d --build
 
 .PHONY: debug
 debug: env ## Start with debugpy and wait for the IDE to attach (port 5678)
-	DEBUG=1 DEBUGPY_WAIT=1 $(COMPOSE) up --build
+	DEBUG=1 DEBUGPY_WAIT=1 $(COMPOSE_DEV) up --build
 
 .PHONY: down
 down: ## Stop the stack
@@ -93,6 +102,17 @@ dbrestore: ## Restore: make dbrestore db=test file=backups/odoo-x.dump
 	$(COMPOSE) exec -T db pg_restore -U $${DB_USER:-odoo} -d $${db:?set db=name} \
 		--clean --if-exists < $${file:?set file=path}
 
+# --- Repo plumbing ------------------------------------------------------------
+.PHONY: selection
+selection: ## Regenerate src/third_party_addons/_selected from selection.txt
+	bash platform/scripts/build-selection.sh
+
 .PHONY: submodules
-submodules: ## Pull latest 18.0 for all _vendor submodules
-	git submodule update --remote third_party_addons/_vendor
+submodules: ## Pull latest upstream for all _vendor submodules
+	git submodule update --remote -- src/third_party_addons/_vendor
+	@echo "review + commit the bumps: git add src/third_party_addons/_vendor"
+
+.PHONY: platform
+platform: ## Pull the latest odoo-platform (this submodule)
+	git submodule update --remote -- platform
+	@echo "review + commit the bump: git add platform"

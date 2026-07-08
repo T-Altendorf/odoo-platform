@@ -1,3 +1,7 @@
+# BuildKit reads this because it sits next to platform/Dockerfile
+# (<dockerfile>.dockerignore takes precedence over <context>/.dockerignore).
+# Paths are relative to the build context = the PRODUCT repo root.
+
 # === Git (645MB savings) ===
 .git
 **/.git
@@ -34,7 +38,15 @@
 # === Local dev artifacts ===
 .env
 *.log
-docker-compose.override.yml
-docker-compose.nginx.yml
-deploy/
+odoo.conf
+backups/
+
+# === Build machinery not needed inside the image ===
+docker-compose.yml
 Makefile
+selection.txt
+platform/docker-compose.override.yml
+platform/docker-compose.nginx.yml
+platform/deploy/
+platform/Makefile
+platform/scripts/

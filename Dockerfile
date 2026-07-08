@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# Authoritative deploy image for the gemini_addons18 Odoo 18 ecosystem.
+# Authoritative deploy image for an Odoo 18 product repo that consumes this
+# platform as a submodule at ./platform. Build context = PRODUCT repo root
+# (see platform/docker-compose.yml).
 # Base = official Odoo 18 image (clean upstream == our checkout). Pin it for
 # reproducibility via ODOO_IMAGE (tag or, better, a sha256 digest) in .env.
 #
@@ -26,7 +28,7 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
 
 # Install python requirements.
 #   - every third_party_addons/{_vendor,_static_vendor}/*/requirements.txt
-#   - the repo-root requirements.txt (own / custom extras)
+#   - the product-root requirements.txt (own / custom extras)
 # Set INSTALL_VENDOR_REQS=0 to skip vendor reqs for a slim, fast build.
 ARG INSTALL_VENDOR_REQS=1
 
@@ -39,18 +41,16 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
     --mount=type=bind,source=src/third_party_addons/_static_vendor,target=/tmp/src/third_party_addons/_static_vendor \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
-    # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL 
+    # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL
     # BEFORE running the vendor requirements, preventing the GEN_EMAIL crash.
     pip install --break-system-packages --ignore-installed typing-extensions pyOpenSSL; \
     if [ "$INSTALL_VENDOR_REQS" = "1" ] && [ -d /tmp/src/third_party_addons ]; then \
         find /tmp/src/third_party_addons/_vendor \
              /tmp/src/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
-             # Removed the dangerous -I flag here
              -exec pip install --break-system-packages -r {} \; ; \
     fi; \
     if [ -f /tmp/src/requirements.txt ]; then \
-        # Removed the dangerous -I flag here
         pip install --break-system-packages -r /tmp/src/requirements.txt; \
     fi
 
@@ -58,12 +58,12 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
 # Modifying your code will only hit this layer and below!
 COPY src /mnt/extra-addons
 
-COPY docker/odoo.conf.template /etc/odoo/odoo.conf.template
-COPY docker/entrypoint.sh /usr/local/bin/gemini-entrypoint.sh
-RUN chmod +x /usr/local/bin/gemini-entrypoint.sh \
+COPY platform/docker/odoo.conf.template /etc/odoo/odoo.conf.template
+COPY platform/docker/entrypoint.sh /usr/local/bin/odoo-entrypoint.sh
+RUN chmod +x /usr/local/bin/odoo-entrypoint.sh \
     && chown -R odoo:odoo /mnt/extra-addons /etc/odoo
 
 USER odoo
 
-ENTRYPOINT ["/usr/local/bin/gemini-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/odoo-entrypoint.sh"]
 CMD []

@@ -44,7 +44,8 @@ fi
 
 : "${ODOO_RC:=/var/lib/odoo/odoo.conf}"
 
-: "${UPGRADE_MODULES:=consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself}"
+# Product-specific: no platform default — set UPGRADE_MODULES in the product's .env.
+: "${UPGRADE_MODULES:=}"
 : "${INSTALL_MODULES:=}"
 # Comma-separated list of databases to run -i/-u on. Empty or "False" = skip.
 # Missing dbs are skipped with a warning (never auto-created).

@@ -1,14 +1,34 @@
-# Production / Dokploy stack: Odoo 18 (this repo) + PostgreSQL.
-# Local dev conveniences (published ports, live code mount, reload) live in
-# docker-compose.override.yml, which the docker CLI auto-merges locally but
-# Dokploy does NOT use.
+# Production / Dokploy stack: Odoo 18 + PostgreSQL.
 #
-# All tunables come from .env (see .env.example).
+# This file lives in the odoo-platform SUBMODULE and is consumed from a product
+# repo root via the product's thin docker-compose.yml:
+#
+#   include:
+#     - path: platform/docker-compose.yml
+#       project_directory: .
+#
+# => ALL relative paths in this file resolve against the PRODUCT repo root.
+#
+# Local dev conveniences (published ports, live code mount, reload) live in
+# platform/docker-compose.override.yml — the platform Makefile's dev targets
+# add it explicitly; Dokploy never sees it.
+#
+# All tunables come from the product's .env (see its .env.example).
 
 services:
   db:
     image: postgres:16
     restart: unless-stopped
+    # Postgres tuning (defaults assume ~8GB RAM dedicated to Postgres).
+    # Rule of thumb: shared_buffers ~= 25% of the RAM given to Postgres,
+    # effective_cache_size ~= 50-75%. Scale via .env per deployment.
+    command: >
+      postgres
+      -c shared_buffers=${PG_SHARED_BUFFERS:-2GB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-6GB}
+      -c work_mem=${PG_WORK_MEM:-32MB}
+      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
+      -c max_connections=${PG_MAX_CONNECTIONS:-100}
     environment:
       POSTGRES_USER: ${DB_USER:-odoo}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-odoo}
@@ -29,12 +49,12 @@ services:
 
   odoo:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: .                       # product repo root
+      dockerfile: platform/Dockerfile
       args:
         ODOO_IMAGE: ${ODOO_IMAGE:-odoo:18.0}
         INSTALL_VENDOR_REQS: ${INSTALL_VENDOR_REQS:-1}
-    image: ${IMAGE_NAME:-gemini-odoo18}:${IMAGE_TAG:-latest}
+    image: ${IMAGE_NAME:-odoo-product}:${IMAGE_TAG:-latest}
     pull_policy: build          # local build image — never try to pull from a registry
     restart: unless-stopped
     depends_on:
@@ -61,7 +81,8 @@ services:
       LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-7200}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       INSTALL_MODULES: ${INSTALL_MODULES:-}
-      UPGRADE_MODULES: ${UPGRADE_MODULES:-consistent_time_format,gemini_importer,gemini_production,mrp_bom_structure_xlsx,organize_urself}
+      # Product-specific: set in the product's .env (no platform default).
+      UPGRADE_MODULES: ${UPGRADE_MODULES:-}
       ODOO_ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:-admin}
       UPGRADE_DB: ${UPGRADE_DB:-}
       DEBUG: ${DEBUG:-0}

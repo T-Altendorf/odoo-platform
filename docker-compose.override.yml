@@ -1,5 +1,11 @@
-# Local development overlay. Auto-merged by `docker compose` on your machine;
-# ignored by Dokploy (it deploys docker-compose.yml only).
+# Local development overlay. NOT auto-merged (it lives in the platform
+# submodule) — the platform Makefile's dev targets (`make up`, `make debug`)
+# add it explicitly:
+#
+#   docker compose -f docker-compose.yml -f platform/docker-compose.override.yml
+#
+# Relative paths below resolve against the PRODUCT repo root (the first -f
+# file's directory). Dokploy never uses this file.
 #
 #   * publishes Odoo + Postgres ports to the host
 #   * bind-mounts the repo over /mnt/extra-addons -> edit code, no rebuild
