@@ -15,13 +15,19 @@ product-repo/
 ├── requirements.txt           <-- extra python deps for own modules
 ├── .env / .env.example        <-- deployment config + secrets
 ├── .gitmodules                <-- the product's OWN vendor submodules
-└── src/
-    ├── my_module_a/           <-- own modules
-    └── third_party_addons/
+└── src/                      <-- EXACTLY two dirs (enforced by `make check`):
+    ├── custom_addons/         <-- first-party modules (on addons_path)
+    │   ├── my_module_a/
+    │   └── my_module_b/
+    └── third_party_addons/    <-- everything vendored
         ├── _vendor/           <-- submodules (NEVER on addons_path)
         ├── _static_vendor/    <-- committed snapshots (NEVER on addons_path)
         └── _selected/         <-- generated symlinks (the ONLY vendor dir on addons_path)
 ```
+
+Only `src/custom_addons/` and `src/third_party_addons/_selected/` are on
+`addons_path`. A module placed directly under `src/` (or anywhere else) will not
+load — keep first-party modules in `custom_addons/`. `make check` enforces this.
 
 ## Integration (once per product repo)
 

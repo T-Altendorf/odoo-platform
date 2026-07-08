@@ -38,9 +38,21 @@ fi
 
 : "${LOG_LEVEL:=info}"
 
-# Core addons + our repo root + the cherry-picked third-party modules.
-# NEVER add third_party_addons/_vendor here (see repo README).
-: "${ADDONS_PATH:=/usr/lib/python3/dist-packages/odoo/addons,/mnt/extra-addons,/mnt/extra-addons/third_party_addons/_selected}"
+# Core addons + our first-party modules + the cherry-picked third-party ones.
+# Only src/custom_addons and third_party_addons/_selected are ever on the path.
+# NEVER add the src root or third_party_addons/_vendor here (see repo README).
+: "${ADDONS_PATH:=/usr/lib/python3/dist-packages/odoo/addons,/mnt/extra-addons/custom_addons,/mnt/extra-addons/third_party_addons/_selected}"
+
+# Layout guard: only custom_addons + third_party_addons belong under the addons
+# root. A module dropped anywhere else under src/ is NOT on addons_path and will
+# silently not load — warn loudly so it is caught at boot.
+for _e in /mnt/extra-addons/*/; do
+    _n="$(basename "$_e")"
+    case "$_n" in
+        custom_addons|third_party_addons) ;;
+        *) echo "[entrypoint] WARNING: /mnt/extra-addons/$_n is not custom_addons/ or third_party_addons/ — NOT on addons_path, will not load" >&2 ;;
+    esac
+done
 
 : "${ODOO_RC:=/var/lib/odoo/odoo.conf}"
 

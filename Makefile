@@ -103,8 +103,12 @@ dbrestore: ## Restore: make dbrestore db=test file=backups/odoo-x.dump
 		--clean --if-exists < $${file:?set file=path}
 
 # --- Repo plumbing ------------------------------------------------------------
+.PHONY: check
+check: ## Verify src/ layout (only custom_addons + third_party_addons)
+	bash platform/scripts/check-layout.sh
+
 .PHONY: selection
-selection: ## Regenerate src/third_party_addons/_selected from selection.txt
+selection: check ## Regenerate src/third_party_addons/_selected from selection.txt
 	bash platform/scripts/build-selection.sh
 
 .PHONY: submodules
