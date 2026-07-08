@@ -29,6 +29,20 @@ Only `src/custom_addons/` and `src/third_party_addons/_selected/` are on
 `addons_path`. A module placed directly under `src/` (or anywhere else) will not
 load — keep first-party modules in `custom_addons/`. `make check` enforces this.
 
+## New product in one command
+
+```bash
+git clone https://github.com/T-Altendorf/odoo-platform.git
+bash odoo-platform/scripts/init-product.sh my_tenant   # -> ./my_tenant
+```
+
+Creates a ready-to-run product repo: platform added as a submodule, the enforced
+`src/` skeleton, and all thin config below (`docker-compose.yml`, `Makefile`,
+`selection.txt`, `.env.example`, `.gitignore`, `README.md`), committed. It prints
+the remaining steps (add vendor submodules, `make selection`, create + push the
+GitHub repo, point Dokploy at it). The rest of this section is what that script
+automates, for reference.
+
 ## Integration (once per product repo)
 
 ```bash
