@@ -19,15 +19,16 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
-    # Postgres tuning (defaults assume ~8GB RAM dedicated to Postgres).
+    # Postgres tuning (defaults sized for ~2GB RAM dedicated to Postgres; bump
+    # via .env on bigger boxes, e.g. PG_SHARED_BUFFERS=2GB for ~8GB).
     # Rule of thumb: shared_buffers ~= 25% of the RAM given to Postgres,
     # effective_cache_size ~= 50-75%. Scale via .env per deployment.
     command: >
       postgres
-      -c shared_buffers=${PG_SHARED_BUFFERS:-2GB}
-      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-6GB}
-      -c work_mem=${PG_WORK_MEM:-32MB}
-      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-256MB}
+      -c shared_buffers=${PG_SHARED_BUFFERS:-512MB}
+      -c effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
+      -c work_mem=${PG_WORK_MEM:-8MB}
+      -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}
       -c max_connections=${PG_MAX_CONNECTIONS:-100}
     environment:
       POSTGRES_USER: ${DB_USER:-odoo}
