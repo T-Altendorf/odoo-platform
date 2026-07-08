@@ -58,6 +58,34 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
 # Modifying your code will only hit this layer and below!
 COPY src /mnt/extra-addons
 
+# Guard: fail the build LOUDLY if git submodules weren't checked out (or the
+# build context dropped them, e.g. `git archive`). Every _selected entry is a
+# relative symlink into _vendor/_static_vendor; a _vendor-backed link dangles
+# when its submodule is uninitialized. Verifying each resolves to a real
+# __manifest__.py validates the whole chain (submodule content + relative
+# symlink) in the actual image — generically, with no product-specific module
+# list to maintain (an empty/absent _selected is fine: nothing to check).
+RUN set -eu; \
+    sel=/mnt/extra-addons/third_party_addons/_selected; \
+    miss=0; \
+    if [ -d "$sel" ]; then \
+        for link in "$sel"/*; do \
+            [ -e "$link" ] || [ -L "$link" ] || continue; \
+            name=$(basename "$link"); \
+            if [ ! -f "$link/__manifest__.py" ]; then \
+                echo "ERROR: vendored module '$name' is missing (_selected/$name/__manifest__.py did not resolve)." >&2; \
+                miss=1; \
+            fi; \
+        done; \
+    fi; \
+    if [ "$miss" != 0 ]; then \
+        echo "       git submodules are not checked out in the build context." >&2; \
+        echo "       Fix: 'git submodule update --init --recursive' before build" >&2; \
+        echo "       (in Dokploy/CI, enable submodules; note 'git archive' drops them)." >&2; \
+        exit 1; \
+    fi; \
+    echo "[build] _selected symlinks all resolve — submodules present"
+
 COPY platform/docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY platform/docker/entrypoint.sh /usr/local/bin/odoo-entrypoint.sh
 RUN chmod +x /usr/local/bin/odoo-entrypoint.sh \
