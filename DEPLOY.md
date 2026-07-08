@@ -94,6 +94,55 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
 `PROXY_MODE=True` is required behind Traefik. Volumes `db-data` and `odoo-data`
 (filestore + sessions) persist across redeploys.
 
+### Private submodules & Dokploy auth
+
+Dokploy authenticates only the **top-level** clone. Its GitHub-App provider
+injects a token into the parent URL, but that token is **never** passed to
+submodule clones — so a **private** `_vendor` submodule fails with
+`could not read Username for 'https://github.com'`. Which fix you need depends on
+whether the submodule lives under the **same GitHub account** as the product repo:
+
+**A. Same account → relative URL (no secret).**
+If the product repo and the private submodule are under the same owner (e.g.
+both under `T-Altendorf`), keep Dokploy on the **GitHub-App provider** and make
+the submodule URL **relative** in `.gitmodules`:
+
+```ini
+[submodule "src/third_party_addons/_vendor/organize_urself"]
+	url = ../organize_urself.git        # NOT https://…/T-Altendorf/organize_urself.git
+```
+
+Git resolves a relative submodule URL against the parent's *authenticated* origin
+URL, so it inherits the App token automatically. Requirements: the Dokploy GitHub
+App is installed on that account with access to **both** repos, and recursive
+submodules are enabled. This is the preferred pattern — zero keys.
+
+**B. Cross-account → SSH provider + account key.**
+If the submodule is under a **different** owner than the product repo (e.g. repo
+under `GeminiLabTec`, submodule under `T-Altendorf`), a relative URL would inherit
+the *wrong* account's token and still fail. Instead switch the whole app to SSH,
+because Dokploy's generic **Git provider** exports `GIT_SSH_COMMAND` for the whole
+clone and git **does** propagate that to submodules:
+
+1. Register an **account-level** SSH key (Settings → SSH keys, *not* a per-repo
+   deploy key) on an account that can read **both** repos — i.e. it owns the
+   product repo and is a **collaborator** on the submodule repo.
+2. In Dokploy set the app source to the **Git provider** with the **SSH** URL
+   (`git@github.com:OWNER/repo.git`, colon before owner, trailing `.git` — an
+   `https://…` URL silently skips all SSH/known_hosts setup and clones over HTTPS).
+   Attach the key; keep submodules enabled.
+3. Set the submodule URL in `.gitmodules` to SSH too
+   (`git@github.com:OWNER/submodule.git`).
+
+Dokploy then runs `ssh-keyscan` (populating `known_hosts`, which fixes
+`Host key verification failed`) and reuses the same key + known_hosts for the
+recursive submodule clone.
+
+> ⚠️ GitHub free/Education plans can't set a collaborator to **read-only** — the
+> collaborator gets **write**, and the account key could therefore push to the
+> submodule repo. Compensate with **branch protection** on the submodule's
+> deploy branch (require a PR, block direct/force pushes); that needs GitHub Pro.
+
 ### Ports & reverse proxy (no host ports in prod)
 
 In production the odoo container publishes **zero** host ports — it only
