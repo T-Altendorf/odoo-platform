@@ -9,7 +9,7 @@ A *product repo* owns only its content:
 ```
 product-repo/
 ├── platform/                  <-- THIS repo (submodule)
-├── docker-compose.yml         <-- 3 lines (include, below)
+├── docker-compose.yml         <-- symlink -> platform/docker-compose.yml (see DEPLOY.md)
 ├── Makefile                   <-- 2 lines (config + include, below)
 ├── selection.txt              <-- which vendor modules to load
 ├── requirements.txt           <-- extra python deps for own modules

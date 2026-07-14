@@ -77,7 +77,8 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
 ## Production via Dokploy
 
 1. **Create app** → type **Compose**, point it at this git repo, branch `18.0`,
-   compose file `docker-compose.yml`. Enable **recursive submodule** clone so
+   compose file `docker-compose.yml` (the repo-root one — see "Root compose is a
+   symlink" below). Enable **recursive submodule** clone so
    `third_party_addons/_vendor` is populated.
 2. **Environment** → paste your `.env` values (at minimum `ADMIN_PASSWD`,
    `DB_PASSWORD`). For a fresh database set `INIT_DB=<name>` on the first
@@ -93,6 +94,27 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
 
 `PROXY_MODE=True` is required behind Traefik. Volumes `db-data` and `odoo-data`
 (filestore + sessions) persist across redeploys.
+
+### Root compose is a symlink (don't turn it back into a wrapper)
+
+The product repo's root `docker-compose.yml` is a **symlink** to
+`platform/docker-compose.yml`, not a thin `include:` wrapper. This is load-bearing:
+
+* Dokploy's **domain** feature parses the compose file *statically* and does
+  **not** expand `include:`. A wrapper therefore exposes zero services, and
+  attaching a domain fails with *"service odoo does not exist in the compose"*.
+  A symlink presents the real `services:` (`db`, `odoo`) at the repo root.
+* Pointing Dokploy **directly** at `platform/docker-compose.yml` is *not* a fix:
+  compose then sets the project dir to `./platform`, so `context: .` and
+  `dockerfile: platform/Dockerfile` resolve to `platform/platform/*` (build
+  fails), **and** the repo-root `.env` Dokploy writes is no longer auto-loaded
+  (prod loses `DB_PASSWORD`, `ADMIN_PASSWD`, …).
+* The symlink keeps the project dir at the repo root, so build paths and the
+  root `.env` resolve exactly as they do locally — while the stack stays shared
+  in the submodule (no per-product duplication).
+
+Keep Dokploy's **Compose Path = `./docker-compose.yml`**. `make up` and the
+Makefile already use this same root path, so nothing else changes.
 
 ### Private submodules & Dokploy auth
 

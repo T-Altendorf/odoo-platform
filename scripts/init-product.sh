@@ -45,14 +45,13 @@ touch src/custom_addons/.gitkeep \
       src/third_party_addons/_selected/.gitkeep
 
 # --- thin config files -------------------------------------------------------
-cat > docker-compose.yml <<'YAML'
-# Thin wrapper — ALL deployment machinery lives in the odoo-platform submodule
-# (./platform). Dokploy deploys this file; docker compose resolves the include
-# with paths relative to this repo root. See platform/README.md.
-include:
-  - path: platform/docker-compose.yml
-    project_directory: .
-YAML
+# Root compose is a SYMLINK to the platform stack — NOT an `include:` wrapper.
+# Dokploy's domain UI parses the compose statically and does not expand
+# `include:`, so a wrapper hides the services ("service odoo does not exist").
+# A symlink exposes the real services at the repo root while keeping project-dir
+# at the root, so build paths (context: .) and the root .env that Dokploy writes
+# both resolve correctly. See platform/DEPLOY.md "Root compose is a symlink".
+ln -s platform/docker-compose.yml docker-compose.yml
 
 cat > Makefile <<YAML
 # Product config only — every target lives in the odoo-platform submodule.
