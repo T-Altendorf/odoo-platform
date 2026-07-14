@@ -174,6 +174,28 @@ make up                   # dev stack (ports, live mount, reload)
 \`\`\`
 TXT
 
+# --- submodule watcher workflow ----------------------------------------------
+# Daily PR that bumps every submodule to its tracked-branch tip (logic lives in
+# platform/.github/workflows/bump-submodules.yml). Merge = ship, close = veto;
+# fail-soft skips any submodule it can't fetch. Requires a SUBMODULE_BUMP_PAT
+# repo secret (see that workflow's header). Scheduled runs only fire from the
+# repo's DEFAULT branch.
+PLATFORM_SLUG="$(printf '%s' "$PLATFORM_URL" | sed -E 's#(git@github.com:|https?://github.com/)##; s#\.git/?$##')"
+mkdir -p .github/workflows
+cat > .github/workflows/watch-submodules.yml <<YAML
+name: Watch submodules
+on:
+  schedule:
+    - cron: "17 3 * * *"   # once a day
+  workflow_dispatch:
+jobs:
+  bump:
+    uses: ${PLATFORM_SLUG}/.github/workflows/bump-submodules.yml@18.0
+    secrets:
+      BUMP_TOKEN: \${{ secrets.SUBMODULE_BUMP_PAT }}
+YAML
+echo "    added .github/workflows/watch-submodules.yml"
+
 # --- verify + first commit ---------------------------------------------------
 echo "==> verifying layout"
 bash platform/scripts/check-layout.sh
@@ -195,4 +217,8 @@ Next:
   5. Create the GitHub repo and push:
        gh repo create <owner>/${NAME} --private --source=. --remote=origin --push
   6. Point Dokploy at it (recursive submodule clone + private-repo auth).
+  7. Add the SUBMODULE_BUMP_PAT repo secret so the daily submodule-watcher
+     runs (fine-grained PAT: Contents r/w + Pull requests r/w on this repo,
+     Contents read on any private submodule repos). See
+     .github/workflows/watch-submodules.yml.
 EOF

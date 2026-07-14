@@ -1,35 +1,44 @@
 # Reusable submodule watcher (called from product repos).
 #
-# Checks the given submodule paths against the tip of their tracked branch
-# (the `branch =` line in .gitmodules). If any moved, it (force-)pushes ONE
-# fixed branch with the pointer bump and opens — or refreshes — a single PR.
-# A human merging that PR is what actually ships the update; closing it is a
-# veto. No PR spam: new upstream commits just update the same PR.
+# By default watches EVERY submodule declared in the product's .gitmodules and
+# checks each against the tip of its tracked branch (the `branch =` line). Any
+# that moved are bundled into ONE fixed branch, (force-)pushed, and surfaced as
+# a single PR that a human merges (= ship) or closes (= veto). No PR spam — new
+# upstream commits just refresh the same PR.
 #
-# Caller contract (add .github/workflows/watch-submodules.yml to the product
-# repo, on a schedule + workflow_dispatch trigger):
+# Fail-soft: a submodule we cannot fetch (a private repo the token can't reach,
+# or a transient network error) is logged as a warning and skipped; the run
+# still bumps every submodule it CAN reach. The job only fails on a real error
+# in the push / PR step.
+#
+# Caller contract — add .github/workflows/watch-submodules.yml to the product
+# repo on a schedule + workflow_dispatch trigger. NOTE: scheduled runs only
+# fire from the file on the repo's DEFAULT branch.
 #
 #   jobs:
 #     bump:
 #       uses: <owner>/odoo-platform/.github/workflows/bump-submodules.yml@18.0
-#       with:
-#         paths: src/third_party_addons/_vendor/<your_module_repo>
 #       secrets:
 #         BUMP_TOKEN: ${{ secrets.SUBMODULE_BUMP_PAT }}
 #
-# BUMP_TOKEN must be a fine-grained PAT with Contents read+write and
-# Pull requests read+write on the product repo, plus Contents read on every
-# watched (private) submodule repo. Deliberately only track repos we own —
-# never OCA — so nothing unreviewed can even reach a PR.
+# Optionally pass `with: { paths: "a b c" }` to watch only specific submodules.
+#
+# BUMP_TOKEN: fine-grained PAT with Contents read+write and Pull requests
+# read+write on the product repo, plus Contents read on any PRIVATE submodule
+# repo you want bumped. Public submodules (e.g. OCA) need no extra grant; a
+# private one the token can't read is simply skipped.
 name: Bump submodules
 
 on:
   workflow_call:
     inputs:
       paths:
-        description: Whitespace-separated submodule paths to watch
-        required: true
+        description: >-
+          Whitespace-separated submodule paths to watch. Empty (the default)
+          auto-discovers every submodule in .gitmodules.
+        required: false
         type: string
+        default: ""
       pr_branch:
         description: Fixed branch name used for the bump PR
         required: false
@@ -51,16 +60,45 @@ jobs:
 
       - name: Update watched submodules to their branch tips
         id: update
+        env:
+          PATHS_IN: ${{ inputs.paths }}
         run: |
           set -eu
           git config user.name "submodule-bump[bot]"
           git config user.email "submodule-bump@users.noreply.github.com"
+
+          # Which submodules? An explicit list, else every path in .gitmodules.
+          paths="$PATHS_IN"
+          if [ -z "${paths// /}" ]; then
+            paths=$(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
+                      | awk '{print $2}' || true)
+          fi
+          if [ -z "${paths// /}" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No submodules found to watch."
+            exit 0
+          fi
+
           summary=""
-          for path in ${{ inputs.paths }}; do
-            old=$(git rev-parse "HEAD:$path")
-            git submodule update --init --remote -- "$path"
+          skipped=""
+          changed_paths=""
+          for path in $paths; do
+            # Not a real submodule pointer? Warn and move on.
+            if ! old=$(git rev-parse "HEAD:$path" 2>/dev/null); then
+              echo "::warning::'$path' is not a submodule pointer — skipping"
+              skipped="$skipped $path"
+              continue
+            fi
+            # Fetch failure (private repo w/o access, network) is non-fatal.
+            if ! err=$(git submodule update --init --remote -- "$path" 2>&1); then
+              echo "::warning::could not fetch '$path' (access or network) — skipping"
+              echo "$err"
+              skipped="$skipped $path"
+              continue
+            fi
             new=$(git -C "$path" rev-parse HEAD)
             if [ "$old" != "$new" ]; then
+              changed_paths="$changed_paths $path"
               log=$(git -C "$path" log --oneline "$old..$new" 2>/dev/null || echo "(history unavailable)")
               summary="$summary### \`$path\` \`${old:0:9}\` → \`${new:0:9}\`
           \`\`\`
@@ -69,13 +107,18 @@ jobs:
           "
             fi
           done
+
+          if [ -n "${skipped// /}" ]; then
+            echo "Skipped (unreachable):$skipped"
+          fi
           if [ -z "$summary" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "All watched submodules already at branch tip."
+            echo "All reachable submodules already at branch tip."
             exit 0
           fi
           echo "changed=true" >> "$GITHUB_OUTPUT"
           {
+            echo "changed_paths=$changed_paths"
             echo "summary<<SUMMARY_EOF"
             echo "$summary"
             echo "SUMMARY_EOF"
@@ -88,16 +131,17 @@ jobs:
           BRANCH: ${{ inputs.pr_branch }}
           BASE: ${{ github.ref_name }}
           SUMMARY: ${{ steps.update.outputs.summary }}
+          CHANGED_PATHS: ${{ steps.update.outputs.changed_paths }}
         run: |
           set -eu
           git checkout -B "$BRANCH"
-          git add -- ${{ inputs.paths }}
+          git add -- $CHANGED_PATHS
           git commit -m "chore: bump submodule pointer(s) to branch tip"
           git push -f origin "$BRANCH"
           body="Automated submodule pointer bump — merging this is what deploys it; close to veto.
 
           $SUMMARY
-          _Refreshed automatically whenever the watched branch moves again._"
+          _Refreshed automatically whenever a watched branch moves again._"
           existing=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number -q '.[0].number')
           if [ -n "$existing" ]; then
             gh pr edit "$existing" --body "$body"
