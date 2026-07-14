@@ -8,7 +8,7 @@
 # file's directory). Dokploy never uses this file.
 #
 #   * publishes Odoo + Postgres ports to the host
-#   * bind-mounts the repo over /mnt/extra-addons -> edit code, no rebuild
+#   * bind-mounts the repo over /opt/extra-addons -> edit code, no rebuild
 #   * runs single-process with live reload of python/xml/qweb
 #   * no auto-upgrade on boot (do it explicitly via `make upgrade`)
 
@@ -28,6 +28,6 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       UPGRADE_MODULES: ""        # don't auto-upgrade on every dev restart
     volumes:
-      - ./src:/mnt/extra-addons
+      - ./src:/opt/extra-addons
       - odoo-data:/var/lib/odoo
     command: ["--dev=reload,qweb,xml"]

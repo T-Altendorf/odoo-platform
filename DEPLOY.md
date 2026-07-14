@@ -2,7 +2,7 @@
 
 This repo is the **authoritative source** of the Odoo 18 solution. It ships a
 complete Docker stack (Odoo + PostgreSQL). Odoo core is the official `odoo:18`
-image (this repo's custom code lives in `/mnt/extra-addons`); pin the image for
+image (this repo's custom code lives in `/opt/extra-addons`); pin the image for
 reproducibility instead of vendoring the multi-hundred-MB Odoo source.
 
 ```
@@ -48,7 +48,7 @@ make debug            # = DEBUG=1 DEBUGPY_WAIT=1 docker compose up --build
 ```
 
 Then in VS Code run **"Odoo: Attach (Docker debugpy)"** (port 5678). Breakpoints
-in your modules map via `${workspaceFolder} -> /mnt/extra-addons`. `DEBUGPY_WAIT`
+in your modules map via `${workspaceFolder} -> /opt/extra-addons`. `DEBUGPY_WAIT`
 blocks boot until you attach; drop it to start immediately and attach anytime.
 Debugging forces single-process (the dev overlay already sets `WORKERS=0`).
 

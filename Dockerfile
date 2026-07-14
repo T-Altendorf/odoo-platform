@@ -56,7 +56,14 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
 
 # Now copy the src tree for runtime.
 # Modifying your code will only hit this layer and below!
-COPY src /mnt/extra-addons
+#
+# NOTE: addons live at /opt/extra-addons, NOT the odoo image's /opt/extra-addons.
+# The base image declares `VOLUME /opt/extra-addons`, so anything baked there is
+# copied into an ANONYMOUS volume once and then shadowed by that stale volume on
+# every redeploy — code changes never reach runtime. /opt/extra-addons is a plain
+# image path, so the built code is always what runs. Keep addons off any VOLUME
+# path (ADDONS_PATH in the entrypoint points here too).
+COPY src /opt/extra-addons
 
 # Guard: fail the build LOUDLY if git submodules weren't checked out (or the
 # build context dropped them, e.g. `git archive`). Every _selected entry is a
@@ -66,7 +73,7 @@ COPY src /mnt/extra-addons
 # symlink) in the actual image — generically, with no product-specific module
 # list to maintain (an empty/absent _selected is fine: nothing to check).
 RUN set -eu; \
-    sel=/mnt/extra-addons/third_party_addons/_selected; \
+    sel=/opt/extra-addons/third_party_addons/_selected; \
     miss=0; \
     if [ -d "$sel" ]; then \
         for link in "$sel"/*; do \
@@ -89,7 +96,7 @@ RUN set -eu; \
 COPY platform/docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY platform/docker/entrypoint.sh /usr/local/bin/odoo-entrypoint.sh
 RUN chmod +x /usr/local/bin/odoo-entrypoint.sh \
-    && chown -R odoo:odoo /mnt/extra-addons /etc/odoo
+    && chown -R odoo:odoo /opt/extra-addons /etc/odoo
 
 USER odoo
 
