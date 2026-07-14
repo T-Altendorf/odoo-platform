@@ -77,6 +77,28 @@ Then `make selection` regenerates `src/third_party_addons/_selected/` (relative
 symlinks, stale links pruned) — **commit the symlinks**; deploys and fresh
 clones need no build step.
 
+## Keeping submodules fresh (auto-bump PRs)
+
+`init-product.sh` also drops in `.github/workflows/watch-submodules.yml`, a
+thin caller of the reusable workflow here
+(`.github/workflows/bump-submodules.yml`). Once a day it checks **every**
+submodule in the product's `.gitmodules` against the tip of its tracked branch
+(the `branch =` line) and, if any moved, force-pushes one fixed branch and
+opens — or refreshes — a **single PR**. Merging that PR is what ships the
+update; closing it is a veto. No PR spam; new upstream commits just refresh the
+same PR. It is **fail-soft**: a submodule it can't fetch (a private repo the
+token can't reach, or a network blip) is skipped with a warning, not fatal.
+
+To activate it in a product repo:
+
+1. Add a repo secret **`SUBMODULE_BUMP_PAT`** — a fine-grained PAT with
+   *Contents: read+write* and *Pull requests: read+write* on the product repo,
+   plus *Contents: read* on any **private** submodule repos you want bumped.
+   Public submodules (OCA etc.) need no extra grant.
+2. Make sure the workflow file is on the repo's **default branch** — scheduled
+   runs only fire from there. Use the *Run workflow* button (`workflow_dispatch`)
+   to bump on demand from any branch.
+
 ## Rules
 
 * **NEVER** put `_vendor` or `_static_vendor` on `addons_path` — only
