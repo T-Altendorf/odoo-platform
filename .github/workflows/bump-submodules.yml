@@ -1,0 +1,108 @@
+# Reusable submodule watcher (called from product repos).
+#
+# Checks the given submodule paths against the tip of their tracked branch
+# (the `branch =` line in .gitmodules). If any moved, it (force-)pushes ONE
+# fixed branch with the pointer bump and opens — or refreshes — a single PR.
+# A human merging that PR is what actually ships the update; closing it is a
+# veto. No PR spam: new upstream commits just update the same PR.
+#
+# Caller contract (add .github/workflows/watch-submodules.yml to the product
+# repo, on a schedule + workflow_dispatch trigger):
+#
+#   jobs:
+#     bump:
+#       uses: <owner>/odoo-platform/.github/workflows/bump-submodules.yml@18.0
+#       with:
+#         paths: src/third_party_addons/_vendor/<your_module_repo>
+#       secrets:
+#         BUMP_TOKEN: ${{ secrets.SUBMODULE_BUMP_PAT }}
+#
+# BUMP_TOKEN must be a fine-grained PAT with Contents read+write and
+# Pull requests read+write on the product repo, plus Contents read on every
+# watched (private) submodule repo. Deliberately only track repos we own —
+# never OCA — so nothing unreviewed can even reach a PR.
+name: Bump submodules
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: Whitespace-separated submodule paths to watch
+        required: true
+        type: string
+      pr_branch:
+        description: Fixed branch name used for the bump PR
+        required: false
+        type: string
+        default: auto/bump-submodules
+    secrets:
+      BUMP_TOKEN:
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.BUMP_TOKEN }}
+          # persist-credentials (default true) stores the token for github.com,
+          # so fetching private same-account submodules (relative URLs) works.
+
+      - name: Update watched submodules to their branch tips
+        id: update
+        run: |
+          set -eu
+          git config user.name "submodule-bump[bot]"
+          git config user.email "submodule-bump@users.noreply.github.com"
+          summary=""
+          for path in ${{ inputs.paths }}; do
+            old=$(git rev-parse "HEAD:$path")
+            git submodule update --init --remote -- "$path"
+            new=$(git -C "$path" rev-parse HEAD)
+            if [ "$old" != "$new" ]; then
+              log=$(git -C "$path" log --oneline "$old..$new" 2>/dev/null || echo "(history unavailable)")
+              summary="$summary### \`$path\` \`${old:0:9}\` → \`${new:0:9}\`
+          \`\`\`
+          $log
+          \`\`\`
+          "
+            fi
+          done
+          if [ -z "$summary" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "All watched submodules already at branch tip."
+            exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "summary<<SUMMARY_EOF"
+            echo "$summary"
+            echo "SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push bump branch and open/refresh PR
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BUMP_TOKEN }}
+          BRANCH: ${{ inputs.pr_branch }}
+          BASE: ${{ github.ref_name }}
+          SUMMARY: ${{ steps.update.outputs.summary }}
+        run: |
+          set -eu
+          git checkout -B "$BRANCH"
+          git add -- ${{ inputs.paths }}
+          git commit -m "chore: bump submodule pointer(s) to branch tip"
+          git push -f origin "$BRANCH"
+          body="Automated submodule pointer bump — merging this is what deploys it; close to veto.
+
+          $SUMMARY
+          _Refreshed automatically whenever the watched branch moves again._"
+          existing=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json number -q '.[0].number')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body "$body"
+            echo "Updated existing PR #$existing"
+          else
+            gh pr create --base "$BASE" --head "$BRANCH" \
+              --title "Bump submodules to latest" --body "$body"
+          fi
