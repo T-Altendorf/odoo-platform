@@ -52,7 +52,7 @@ jobs:
   bump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.BUMP_TOKEN }}
           # persist-credentials (default true) stores the token for github.com,
@@ -91,7 +91,8 @@ jobs:
             fi
             # Fetch failure (private repo w/o access, network) is non-fatal.
             if ! err=$(git submodule update --init --remote -- "$path" 2>&1); then
-              echo "::warning::could not fetch '$path' (access or network) — skipping"
+              reason=$(printf '%s\n' "$err" | grep -iE 'denied|authentication|not found|403|401|could not read|remote branch|fatal' | head -1)
+              echo "::warning::could not fetch '$path' — skipping (${reason:-see log below})"
               echo "$err"
               skipped="$skipped $path"
               continue
