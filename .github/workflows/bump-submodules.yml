@@ -62,10 +62,31 @@ jobs:
         id: update
         env:
           PATHS_IN: ${{ inputs.paths }}
+          BUMP_TOKEN: ${{ secrets.BUMP_TOKEN }}
         run: |
           set -eu
           git config user.name "submodule-bump[bot]"
           git config user.email "submodule-bump@users.noreply.github.com"
+
+          # Authenticate EVERY github.com fetch, including submodule fetches.
+          # The checkout action only stores the token on the superproject's
+          # config; submodule fetches run in their own context and don't inherit
+          # it, so a PRIVATE submodule would prompt for a username and fail.
+          # A global insteadOf rewrite embeds the token in the URL so it applies
+          # everywhere (never written to any committed file). Masked in logs.
+          if [ -n "${BUMP_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${BUMP_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+          fi
+
+          # .gitmodules may mark submodules `shallow = true`. A shallow clone
+          # has no refs/remotes/origin/<branch> for `--remote` to resolve (fatal
+          # "Unable to find ... revision") and hides the old..new changelog.
+          # Neutralize it for this run only (this edit is never committed).
+          git config -f .gitmodules --get-regexp '\.shallow$' 2>/dev/null \
+            | awk '{print $1}' \
+            | while read -r k; do git config -f .gitmodules --unset "$k" || true; done
 
           # Which submodules? An explicit list, else every path in .gitmodules.
           paths="$PATHS_IN"
