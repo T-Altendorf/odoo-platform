@@ -1,0 +1,21 @@
+# ⚠️  DANGEROUS OVERLAY — publishes raw Postgres on the host. Cleartext TCP
+# (Postgres cannot go through Traefik/TLS), guarded only by DB_PASSWORD.
+#
+# Intended for a one-off remote dump/restore: enable it, do the work, then
+# REMOVE it from COMPOSE_FILE and redeploy. Firewall to your own IP meanwhile.
+#
+# Deliberately a separate file from the odoo overlay: exposing the odoo UI to a
+# VPN must never drag raw Postgres onto the network with it.
+#
+# Enable by adding it to COMPOSE_FILE in the product's .env (paths are relative
+# to the product repo root):
+#
+#     COMPOSE_FILE=docker-compose.yml:platform/docker-compose.dangerously-expose-db.yml
+#     DB_EXTERNAL_PORT=5433
+#
+# Not loaded by default — no ports are published unless this file is listed.
+
+services:
+  db:
+    ports:
+      - "${DB_EXTERNAL_PORT:-5432}:5432"

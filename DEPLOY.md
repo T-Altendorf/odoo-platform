@@ -84,10 +84,19 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
    `DB_PASSWORD`). For a fresh database set `INIT_DB=<name>` on the first
    deploy, then clear it. Set `UPGRADE_DB=<name>` for ongoing upgrades.
 3. **Domain** — two options:
-   - *UI (simplest):* add a domain mapped to service `odoo`, port `8069`.
+   - *UI (simplest):* add **two** domain entries, both host `odoo.example.com`,
+     both service `odoo`, HTTPS + letsencrypt:
+
+     | Path | Port | Purpose |
+     |------|------|---------|
+     | `/`  | 8069 | normal HTTP traffic |
+     | `/websocket` | 8072 | longpolling/gevent — **required** when `WORKERS>0` |
+
+     Without the second entry the websocket falls through to 8069 and the UI
+     hangs on "connection lost" / live chat + notifications stop working.
    - *Compose labels:* set `DOMAIN` in env, uncomment the Traefik `labels` +
      `networks` blocks in `docker-compose.yml`. The second router sends
-     `/websocket` to `GEVENT_PORT` (needed when `WORKERS>0`).
+     `/websocket` to `GEVENT_PORT` — same split as the two UI entries above.
 4. **Deploy.** On boot the entrypoint renders the config, waits for Postgres,
    creates any `INIT_DB` databases, upgrades every `UPGRADE_DB` database, and
    serves. Missing dbs in `UPGRADE_DB` are skipped (never auto-created).
@@ -181,10 +190,10 @@ upstream just becomes the **service name + internal port**:
 
 Two ways to run the proxy:
 
-- **Dokploy/Traefik** — set the domain in the UI (or the `${DOMAIN}` labels in
-  `docker-compose.yml`). Traefik sets `X-Forwarded-*` and terminates TLS; you
-  publish nothing. The second router sends `/websocket` to 8072 (needed when
-  `WORKERS>0`).
+- **Dokploy/Traefik** — add **two** domain entries in the UI for the same host
+  (`/` → 8069 and `/websocket` → 8072), or use the `${DOMAIN}` labels in
+  `docker-compose.yml`. Traefik sets `X-Forwarded-*` and terminates TLS; you
+  publish nothing. The `/websocket` route is required when `WORKERS>0`.
 - **Self-managed nginx** (mirrors your current vhost exactly):
   ```bash
   docker compose -f docker-compose.yml -f docker-compose.nginx.yml up -d
@@ -192,6 +201,55 @@ Two ways to run the proxy:
   Config lives in `deploy/nginx/templates/default.conf.template` (driven by
   `${DOMAIN}`). Mount your existing `/etc/letsencrypt` to terminate TLS there,
   or keep it HTTP behind Dokploy. Don't combine with the dev override.
+- **Inner VPN, no reverse proxy** — see "Dangerously exposed ports" below.
+
+### Dangerously exposed ports (opt-in, off by default)
+
+Neither `db` nor `odoo` publishes a host port in prod. Two overlay files can
+turn that on, kept **separate** on purpose so enabling VPN access to the odoo
+UI never drags raw Postgres onto the network with it.
+
+| overlay | publishes | env |
+|---|---|---|
+| `platform/docker-compose.dangerously-expose-odoo.yml` | odoo http + websocket | `ODOO_EXTERNAL_PORT` (8069), `ODOO_EXTERNAL_GEVENT_PORT` (8072) |
+| `platform/docker-compose.dangerously-expose-db.yml` | raw Postgres | `DB_EXTERNAL_PORT` (5432) |
+
+Enable by listing the overlay in `COMPOSE_FILE` in the product's `.env` —
+colon-separated, relative to the repo root, base file first:
+
+```bash
+# odoo on an inner-VPN box with no proxy in front
+COMPOSE_FILE=docker-compose.yml:platform/docker-compose.dangerously-expose-odoo.yml
+PROXY_MODE=False                 # nothing is terminating in front now
+
+# postgres, one-off remote dump/restore — REMOVE and redeploy afterwards
+COMPOSE_FILE=docker-compose.yml:platform/docker-compose.dangerously-expose-db.yml
+DB_EXTERNAL_PORT=5433
+```
+
+Compose reads `COMPOSE_FILE` from `.env`, so nothing else changes; without it
+the overlays are never loaded and `docker compose ps` shows no published ports.
+
+> ⚠️ These bind `0.0.0.0` and bypass TLS entirely — odoo serves its login page
+> over plain HTTP, and Postgres is cleartext TCP guarded only by `DB_PASSWORD`.
+> Only enable on a box that is not publicly reachable, and firewall the ports
+> to the VPN subnet / your own IP. Two stacks on one host will collide on these
+> ports — give one different `*_EXTERNAL_*` values.
+
+Two things that do **not** work, both verified the hard way:
+
+* **A `ports:` entry on `odoo`/`db` with an "empty = off" default.** A `ports:`
+  entry always publishes; an empty host port just publishes on a *random*
+  public port (`0.0.0.0:60141->8069/tcp`), which is worse than a fixed one.
+* **A profile-gated sidecar with `network_mode: "service:odoo"` + `ports:`.**
+  `docker compose config` validates it, but `up` always fails with
+  `conflicting options: port publishing and the container type network mode` —
+  a container sharing another's netns cannot publish ports. Overlay files are
+  the only mechanism that actually yields *zero* published ports by default.
+
+> **Dokploy:** it invokes compose with an explicit `-f`, which overrides
+> `COMPOSE_FILE`. Verify on the target app that the ports really appear before
+> relying on this there; the `.env` route is what the Makefile/CLI uses.
 
 Multi-tenant: your nginx sends `X-Odoo-dbfilter ^UUs.*` (the `dbfilter_from_header`
 module). `DB_NAME=False` is the default. List your tenant dbs in `UPGRADE_DB`

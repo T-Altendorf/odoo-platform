@@ -37,11 +37,10 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - db-data:/var/lib/postgresql/data
-    # TEMP: raw-TCP exposure for one-off remote restore. REMOVE after restore +
-    # redeploy. Postgres can't go through Traefik/HTTPS. Set DB_EXTERNAL_PORT in
-    # .env (e.g. 5433); restrict by firewall to your IP while open.
-    ports:
-      - "${DB_EXTERNAL_PORT:-5432}:5432"
+    # No `ports:` on purpose — prod publishes nothing. To expose Postgres for a
+    # one-off remote restore, opt in via docker-compose.dangerously-expose-db.yml
+    # (see DEPLOY.md "Dangerously exposed ports"). A `ports:` entry here would
+    # publish on EVERY deployment; there is no "off" value for one.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-odoo}"]
       interval: 5s
@@ -94,6 +93,10 @@ services:
     expose:
       - "${HTTP_PORT:-8069}"
       - "${GEVENT_PORT:-8072}"
+    # No `ports:` on purpose — behind Traefik/nginx the proxy reaches odoo over
+    # the docker network. For an inner-VPN box with no proxy, opt in via
+    # docker-compose.dangerously-expose-odoo.yml (see DEPLOY.md). A `ports:`
+    # entry here would publish on EVERY deployment; there is no "off" value.
     # --- Dokploy / Traefik domain routing ------------------------------------
     # Easiest: leave these off and set the domain in the Dokploy UI
     #   (service: odoo, port: 8069). For workers>0, websockets need a 2nd route.

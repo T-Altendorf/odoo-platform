@@ -1,0 +1,20 @@
+# ⚠️  DANGEROUS OVERLAY — publishes odoo on the host, bypassing Traefik/nginx
+# and therefore TLS. The login page is then served over plain HTTP on whatever
+# interface docker binds (0.0.0.0 by default).
+#
+# Only for inner-VPN / airgapped boxes that are NOT publicly reachable.
+# Firewall the ports to the VPN subnet.
+#
+# Enable by adding it to COMPOSE_FILE in the product's .env (paths are relative
+# to the product repo root):
+#
+#     COMPOSE_FILE=docker-compose.yml:platform/docker-compose.dangerously-expose-odoo.yml
+#     PROXY_MODE=False        # nothing is terminating in front of odoo now
+#
+# Not loaded by default — no ports are published unless this file is listed.
+
+services:
+  odoo:
+    ports:
+      - "${ODOO_EXTERNAL_PORT:-8069}:${HTTP_PORT:-8069}"
+      - "${ODOO_EXTERNAL_GEVENT_PORT:-8072}:${GEVENT_PORT:-8072}"

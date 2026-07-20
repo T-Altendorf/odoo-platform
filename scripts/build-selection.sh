@@ -24,8 +24,11 @@ SELECTED="$TPA/_selected"
 mkdir -p "$SELECTED"
 
 # Collect wanted module names + create/refresh links.
+# `|| [ -n "$line" ]` — a selection.txt whose last line has no trailing newline
+# would otherwise be silently DROPPED (read returns non-zero on EOF even though
+# it filled $line), so the final module never gets linked.
 wanted=()
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"                      # strip trailing comments
     line="$(echo "$line" | xargs)"          # trim
     [ -z "$line" ] && continue
