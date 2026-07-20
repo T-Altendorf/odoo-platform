@@ -93,6 +93,22 @@ echo "[entrypoint] rendered $ODOO_RC"
 # Appended rather than templated: the key NAME is dynamic (encryption_key_<env>)
 # and we must not emit a half-configured entry when the key is unset.
 if [ -n "$RUNNING_ENV" ]; then
+    # RUNNING_ENV names an environment (prod, staging) and is NOT a secret: it
+    # is written to odoo.conf in cleartext and copied into
+    # encrypted.data.environment, i.e. into the database. Pasting key material
+    # here is an easy and expensive mix-up — it leaks the secret into the very
+    # dump encryption exists to protect, and leaves encryption silently off
+    # because encryption_key_<that blob> is never defined. Refuse it early.
+    if [ ${#RUNNING_ENV} -gt 32 ] ||
+       [ -n "$(printf '%s' "$RUNNING_ENV" | tr -d 'a-zA-Z0-9_-')" ]; then
+        echo "[entrypoint] ERROR: RUNNING_ENV must be a short environment name" >&2
+        echo "[entrypoint]        (letters, digits, _ or -, max 32 chars), e.g." >&2
+        echo "[entrypoint]        RUNNING_ENV=prod. It is not the secret — the" >&2
+        echo "[entrypoint]        Fernet key belongs in ENCRYPTION_KEY." >&2
+        echo "[entrypoint]        Got ${#RUNNING_ENV} chars. If you pasted a key" >&2
+        echo "[entrypoint]        here, treat it as leaked and generate a new one." >&2
+        exit 1
+    fi
     printf '\nrunning_env = %s\n' "$RUNNING_ENV" >> "$ODOO_RC"
 fi
 if [ -n "$ENCRYPTION_KEY" ]; then
@@ -101,6 +117,26 @@ if [ -n "$ENCRYPTION_KEY" ]; then
         echo "[entrypoint]        data_encryption keys are per-environment; set" >&2
         echo "[entrypoint]        RUNNING_ENV (e.g. prod) in your .env." >&2
         exit 1
+    fi
+    # data_encryption feeds this straight to Fernet(), which only fails when the
+    # first secret is stored — deep inside a migration, long after boot. Check it
+    # here so a bad key fails loudly at the point it was configured.
+    if python3 -c "import cryptography" 2>/dev/null; then
+        if ! python3 -c "
+import os, sys
+from cryptography.fernet import Fernet
+try:
+    Fernet(os.environ['ENCRYPTION_KEY'].encode())
+except Exception as exc:
+    sys.stderr.write(str(exc) + '\n')
+    sys.exit(1)
+" 2>/dev/null; then
+            echo "[entrypoint] ERROR: ENCRYPTION_KEY is not a valid Fernet key." >&2
+            echo "[entrypoint]        It must be 32 bytes, url-safe base64 (44" >&2
+            echo "[entrypoint]        chars) — a passphrase will not work. Make one:" >&2
+            echo "[entrypoint]          python3 -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"" >&2
+            exit 1
+        fi
     fi
     printf 'encryption_key_%s = %s\n' "$RUNNING_ENV" "$ENCRYPTION_KEY" >> "$ODOO_RC"
     echo "[entrypoint] data encryption enabled (running_env=$RUNNING_ENV)"
