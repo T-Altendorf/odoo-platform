@@ -373,6 +373,44 @@ UPGRADE_DB=                      # skip upgrades entirely (fast restart)
 INIT_DB=NewClient                # create a fresh db (one-shot, then clear)
 ```
 
+## Secrets at rest (`RUNNING_ENV` / `ENCRYPTION_KEY`)
+
+Modules holding third-party credentials (API keys, PSD2 signing keys) should not
+keep them readable in the database — a dump, a backup or a replica would carry
+them along. The OCA `data_encryption` module (from `OCA/server-env`) stores such
+values as Fernet ciphertext in its `encrypted.data` model, with the key read
+from `odoo.conf` rather than from any table.
+
+The entrypoint renders that config for you:
+
+```bash
+RUNNING_ENV=prod                 # names the key set
+ENCRYPTION_KEY=<fernet key>      # 32-byte urlsafe-base64
+```
+
+which becomes `running_env = prod` plus `encryption_key_prod = …` appended to
+`$ODOO_RC`. Two environments can therefore hold different secrets against the
+same codebase — restoring a prod dump into staging leaves the ciphertext
+undecryptable there, which is the point.
+
+Generate a key with:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+It must be a real Fernet key, not a passphrase — `data_encryption` feeds the
+value straight to `Fernet()`.
+
+> **Keep the key in a password manager, not only in `.env`.** Losing it makes
+> every stored secret permanently unreadable; there is no recovery path.
+
+Both variables are optional. Setting neither leaves secrets in cleartext and the
+entrypoint says so at boot. Setting `ENCRYPTION_KEY` without `RUNNING_ENV` is a
+hard error rather than a silent fallback — a half-configured key would otherwise
+look like it worked while still storing plaintext. `$ODOO_RC` is `chmod 600`
+since it now carries the key alongside `db_password` and `admin_passwd`.
+
 ## Python requirements
 The image installs, at build time:
 - every `third_party_addons/{_vendor,_static_vendor}/*/requirements.txt`

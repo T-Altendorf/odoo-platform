@@ -80,6 +80,11 @@ services:
       LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-3600}
       LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-7200}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Secrets at rest (OCA data_encryption). Generate the key with:
+      #   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Keep it in a password manager: losing it makes stored secrets unreadable.
+      RUNNING_ENV: ${RUNNING_ENV:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       INSTALL_MODULES: ${INSTALL_MODULES:-}
       # Product-specific: set in the product's .env (no platform default).
       UPGRADE_MODULES: ${UPGRADE_MODULES:-}

@@ -71,6 +71,13 @@ done
 : "${DEBUGPY_PORT:=5678}"
 : "${DEBUGPY_WAIT:=}"
 
+# Secrets at rest (OCA data_encryption). ENCRYPTION_KEY never lands in the
+# database: it is rendered into odoo.conf at boot, so a DB dump alone cannot
+# decrypt anything stored through the encrypted.data model.
+# RUNNING_ENV names the key set, letting prod/staging hold different secrets.
+: "${RUNNING_ENV:=}"
+: "${ENCRYPTION_KEY:=}"
+
 export DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_MAXCONN DBFILTER LIST_DB \
        ADMIN_PASSWD DATA_DIR HTTP_PORT GEVENT_PORT PROXY_MODE WORKERS \
        MAX_CRON_THREADS LIMIT_MEMORY_SOFT LIMIT_MEMORY_HARD LIMIT_REQUEST \
@@ -78,7 +85,28 @@ export DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_MAXCONN DBFILTER LIST_DB \
 
 # --- Render config -----------------------------------------------------------
 envsubst < /etc/odoo/odoo.conf.template > "$ODOO_RC"
+# odoo.conf holds db_password, admin_passwd and (below) the encryption key.
+chmod 600 "$ODOO_RC"
 echo "[entrypoint] rendered $ODOO_RC"
+
+# --- Secrets at rest ---------------------------------------------------------
+# Appended rather than templated: the key NAME is dynamic (encryption_key_<env>)
+# and we must not emit a half-configured entry when the key is unset.
+if [ -n "$RUNNING_ENV" ]; then
+    printf '\nrunning_env = %s\n' "$RUNNING_ENV" >> "$ODOO_RC"
+fi
+if [ -n "$ENCRYPTION_KEY" ]; then
+    if [ -z "$RUNNING_ENV" ]; then
+        echo "[entrypoint] ERROR: ENCRYPTION_KEY is set but RUNNING_ENV is empty." >&2
+        echo "[entrypoint]        data_encryption keys are per-environment; set" >&2
+        echo "[entrypoint]        RUNNING_ENV (e.g. prod) in your .env." >&2
+        exit 1
+    fi
+    printf 'encryption_key_%s = %s\n' "$RUNNING_ENV" "$ENCRYPTION_KEY" >> "$ODOO_RC"
+    echo "[entrypoint] data encryption enabled (running_env=$RUNNING_ENV)"
+elif [ -n "$RUNNING_ENV" ]; then
+    echo "[entrypoint] running_env=$RUNNING_ENV (no ENCRYPTION_KEY — secrets stay in cleartext)"
+fi
 
 # --- Wait for postgres -------------------------------------------------------
 echo "[entrypoint] waiting for postgres at ${DB_HOST}:${DB_PORT} ..."
