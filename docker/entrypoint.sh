@@ -95,6 +95,14 @@ db_exists() {
         -tAc "SELECT 1 FROM pg_database WHERE datname='$1'" postgres 2>/dev/null | grep -q 1
 }
 
+# module_installed <db> <module> — cheap check, avoids a full odoo boot just to
+# find out whether the module is already there.
+module_installed() {
+    PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
+        -tAc "SELECT 1 FROM ir_module_module WHERE name='$2' AND state='installed'" \
+        "$1" 2>/dev/null | grep -q 1
+}
+
 # INIT_DB: one-shot fresh database creation (set once, then clear).
 if [ -n "$INIT_DB" ] && [ "$INIT_DB" != "False" ]; then
     IFS=',' read -ra _init_dbs <<< "$INIT_DB"
@@ -106,7 +114,16 @@ if [ -n "$INIT_DB" ] && [ "$INIT_DB" != "False" ]; then
         else
             echo "[entrypoint] INIT_DB: creating '$_db' with base + modules"
             install_list="base"
-            [ -n "${UPGRADE_MODULES}" ] && install_list="${install_list},${UPGRADE_MODULES}"
+            # 'auto'/'all' are upgrade *modes*, not module names — splicing them
+            # into -i yields a dummy Odoo silently ignores, so a fresh db would
+            # come up with base only. Install the auto-update addon instead so
+            # the mode works from the first boot; name real modules in
+            # INSTALL_MODULES.
+            case "${UPGRADE_MODULES}" in
+                auto)  install_list="${install_list},module_auto_update" ;;
+                all|"") ;;
+                *)     install_list="${install_list},${UPGRADE_MODULES}" ;;
+            esac
             [ -n "${INSTALL_MODULES}" ] && install_list="${install_list},${INSTALL_MODULES}"
             odoo -c "$ODOO_RC" -d "$_db" -i "$install_list" --stop-after-init
             odoo shell -c "$ODOO_RC" -d "$_db" --no-http <<PYEOF
@@ -133,7 +150,27 @@ if [ -n "$UPGRADE_DB" ] && [ "$UPGRADE_DB" != "False" ]; then
             echo "[entrypoint] odoo -i ${INSTALL_MODULES} (db=${_db})"
             odoo -c "$ODOO_RC" -d "$_db" -i "${INSTALL_MODULES}" --stop-after-init
         fi
-        if [ -n "${UPGRADE_MODULES}" ]; then
+        if [ "${UPGRADE_MODULES}" = "auto" ]; then
+            # Checksum-based: OCA module_auto_update hashes every installed
+            # addon dir and upgrades ONLY the ones whose files changed. When
+            # nothing changed it is a no-op, so restarts cost seconds instead
+            # of a full `-u all` pass.
+            if ! module_installed "$_db" module_auto_update; then
+                echo "[entrypoint] installing module_auto_update (db=${_db})"
+                odoo -c "$ODOO_RC" -d "$_db" -i module_auto_update --stop-after-init
+            fi
+            # NOTE: the first run after install upgrades everything (no saved
+            # hashes yet) — by design, it errs toward safety. Later runs are cheap.
+            echo "[entrypoint] checksum upgrade (db=${_db})"
+            odoo shell -c "$ODOO_RC" -d "$_db" --no-http <<'PYEOF'
+# Runs in-process: upgrade_changed_checksum() -> base.module.upgrade.upgrade_module()
+# -> Registry.new(update_module=True). Commits internally at each step.
+# An exception here propagates and exits non-zero (stdin is not a tty), so
+# `set -e` aborts the boot rather than serving a half-upgraded database.
+env['ir.module.module'].upgrade_changed_checksum()
+env.cr.commit()
+PYEOF
+        elif [ -n "${UPGRADE_MODULES}" ]; then
             echo "[entrypoint] odoo -u ${UPGRADE_MODULES} (db=${_db})"
             odoo -c "$ODOO_RC" -d "$_db" -u "${UPGRADE_MODULES}" --stop-after-init
         fi

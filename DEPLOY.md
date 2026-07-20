@@ -321,12 +321,52 @@ The entrypoint manages databases via two env vars:
   boot. Missing dbs are **skipped with a warning** (never auto-created). Empty
   or `"False"` = skip all upgrades (fast restart).
 
-`UPGRADE_MODULES` (default = the five own modules) runs `-u` — safe because
-their code is version-controlled here. `INSTALL_MODULES` runs `-i` (use once
-per fresh DB, then clear).
+`INSTALL_MODULES` runs `-i` (use once per fresh DB, then clear).
+
+### `UPGRADE_MODULES` — three modes
+
+| value | behaviour | boot cost |
+|---|---|---|
+| `auto` **(recommended)** | checksum-based: upgrade only addons whose files changed | seconds when nothing changed |
+| `<comma list>` | upgrade exactly these modules | small, fixed |
+| `all` | force-upgrade every installed module | full, **every** boot |
+| empty | skip upgrades entirely | none |
+
+**`auto`** uses OCA `module_auto_update` (vendored in `oca_server_tools`, must be
+in `selection.txt`). It sha1-hashes every installed addon directory, stores the
+hashes in `ir.config_parameter`, and upgrades only those that differ — then
+saves new hashes *after* a successful run, so a failed upgrade retries rather
+than being silently skipped. Odoo cascades an upgrade to dependent modules, and
+vendor submodule bumps change file hashes, so both are caught automatically.
+
+The entrypoint installs `module_auto_update` on first use (a cheap SQL check
+avoids booting Odoo just to find out), then runs, in-process via `odoo shell`:
+
+```python
+env['ir.module.module'].upgrade_changed_checksum()
+```
+
+> First run after enabling `auto` upgrades **everything** — there are no saved
+> hashes yet, and the module deliberately errs toward safety. Subsequent boots
+> are cheap. (`_save_installed_checksums()` can seed hashes without upgrading,
+> but only when you are certain disk and DB are already in sync.)
+
+**`all`** has two sharp edges, both hit in practice: it costs the full upgrade
+on *every* restart (there is no change detection — `load_data` re-runs for every
+module regardless), and it dependency-checks every installed module, so a single
+unmet python dep anywhere — including in a legacy module you no longer use —
+raises `UserError` and blocks startup entirely.
+
+`auto` and `all` are *modes*, not module names. The `INIT_DB` path handles this:
+`auto` installs `module_auto_update` on the fresh db, `all` is dropped. Name real
+modules in `INSTALL_MODULES` — splicing a mode into `-i` yields a dummy that Odoo
+silently ignores, leaving a fresh db with `base` only.
 
 Examples:
 ```bash
+UPGRADE_MODULES=auto             # only what changed (recommended)
+UPGRADE_MODULES=my_mod,other     # exactly these
+UPGRADE_MODULES=all              # everything, every boot
 UPGRADE_DB=UUs                   # upgrade one db every boot
 UPGRADE_DB=UUs,UUs_Test          # upgrade multiple dbs
 UPGRADE_DB=                      # skip upgrades entirely (fast restart)
