@@ -118,7 +118,8 @@ To activate it in a product repo:
 | `make up` / `make debug` | dev stack (ports, live mount, reload / debugpy) |
 | `make build` | build the prod image |
 | `make selection` | regenerate `_selected` from `selection.txt` |
-| `make submodules` | bump all `_vendor` submodules to latest upstream |
+| `make submodules` | bump all `_vendor` submodules to latest upstream (runs `dev-remotes` first) |
+| `make dev-remotes` | rewrite SSH submodule URLs to HTTPS in local config (dev machines using `gh`; deploy keeps SSH) |
 | `make platform` | bump this platform submodule |
 | `make upgrade` / `make init` / `make db*` | module + database ops (see `make help`) |
 

@@ -111,9 +111,28 @@ check: ## Verify src/ layout (only custom_addons + third_party_addons)
 selection: check ## Regenerate src/third_party_addons/_selected from selection.txt
 	bash platform/scripts/build-selection.sh
 
+# SSH submodule URLs exist for the deploy pipeline (Dokploy pulls them with a
+# server-side SSH key). Local dev machines authenticate via gh over HTTPS, so
+# rewrite those URLs to HTTPS in LOCAL config only — .gitmodules is untouched.
+.PHONY: dev-remotes
+dev-remotes: ## Point SSH-only submodules at HTTPS locally (deploy keeps SSH)
+	@git config --file .gitmodules --get-regexp '^submodule\..*\.url$$' | \
+	while read -r key url; do \
+		case "$$url" in \
+		git@github.com:*) \
+			https="https://github.com/$${url#git@github.com:}"; \
+			name="$${key#submodule.}"; name="$${name%.url}"; \
+			path="$$(git config --file .gitmodules submodule.$$name.path)"; \
+			git config "submodule.$$name.url" "$$https"; \
+			if [ -e "$$path/.git" ]; then git -C "$$path" remote set-url origin "$$https"; fi; \
+			echo "local override: $$name -> $$https"; \
+			;; \
+		esac; \
+	done
+
 .PHONY: submodules
-submodules: ## Pull latest upstream for all _vendor submodules
-	git submodule update --remote -- src/third_party_addons/_vendor
+submodules: dev-remotes ## Pull latest upstream for all _vendor submodules
+	git submodule update --init --remote -- src/third_party_addons/_vendor
 	@echo "review + commit the bumps: git add src/third_party_addons/_vendor"
 
 .PHONY: platform

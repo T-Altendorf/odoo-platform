@@ -169,6 +169,12 @@ Dokploy then runs `ssh-keyscan` (populating `known_hosts`, which fixes
 `Host key verification failed`) and reuses the same key + known_hosts for the
 recursive submodule clone.
 
+**Local dev with pattern B:** the SSH `.gitmodules` URL fails on dev machines
+that authenticate to GitHub via `gh` over HTTPS (no registered SSH key). Don't
+change `.gitmodules` — run `make dev-remotes` (also part of `make submodules`),
+which rewrites `git@github.com:` submodule URLs to HTTPS in **local** git config
+and the submodule's origin only. One-time prerequisite: `gh auth setup-git`.
+
 > ⚠️ GitHub free/Education plans can't set a collaborator to **read-only** — the
 > collaborator gets **write**, and the account key could therefore push to the
 > submodule repo. Compensate with **branch protection** on the submodule's

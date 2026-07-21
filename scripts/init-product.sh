@@ -172,6 +172,16 @@ make selection            # build _selected symlinks (commit them)
 cp .env.example .env      # then edit secrets
 make up                   # dev stack (ports, live mount, reload)
 \`\`\`
+
+## Updating vendor submodules
+\`\`\`bash
+make submodules           # bump every _vendor submodule to latest upstream
+\`\`\`
+Submodules pinned to SSH URLs for deploy auth (see platform/DEPLOY.md
+"Private submodules & Dokploy auth", pattern B) fail on dev machines that use
+\`gh\` over HTTPS. \`make submodules\` handles this via \`make dev-remotes\`,
+which rewrites them to HTTPS in local git config only — \`.gitmodules\` keeps
+SSH for deploy. One-time prerequisite: \`gh auth setup-git\`.
 TXT
 
 # --- submodule watcher workflow ----------------------------------------------
