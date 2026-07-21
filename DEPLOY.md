@@ -25,6 +25,8 @@ Requirements: Docker + Docker Compose, and the `_vendor` submodules populated:
 
 ```bash
 git submodule update --init --recursive
+make hooks                    # once per clone: pre-commit checks (layout +
+                              # selection_reasons.md coverage, see platform/README.md)
 cp .env.example .env          # then edit secrets
 make up                       # build + start (publishes 8069/8072, live reload)
 make logs

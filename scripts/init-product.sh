@@ -64,11 +64,23 @@ YAML
 cat > selection.txt <<'TXT'
 # Vendor modules this product loads. Paths relative to src/third_party_addons/.
 # After editing:  make selection   (regenerates _selected symlinks; commit them)
+# Every module also needs a why-line in selection_reasons.md (pre-commit
+# enforced; `make selection` appends the stubs).
 # Rules: see platform/README.md — never put _vendor/_static_vendor on addons_path.
 
 # _vendor/oca_knowledge/document_page
 # _static_vendor/auto_database_backup
 TXT
+
+# selection_reasons.md — one why-line per loaded module, enforced by the
+# pre-commit hook. `make selection` creates stubs; humans write the reasons.
+bash platform/scripts/selection-reasons.sh --sync
+
+# Commit-time checks (layout + documented selection) for every clone of this
+# repo. core.hooksPath is per-clone config, so the README tells clones to
+# re-run `make hooks`.
+git config core.hooksPath platform/githooks
+echo "    installed pre-commit checks (make hooks)"
 
 cat > requirements.txt <<'TXT'
 # Extra python deps for this product's OWN modules. Vendor deps are installed
@@ -164,10 +176,15 @@ src/
 
 ## Quick start
 \`\`\`bash
+# fresh clone: activate the commit-time checks once
+make hooks
+
 # add a vendor repo, then pick its modules
 git submodule add -b 18.0 https://github.com/OCA/knowledge.git src/third_party_addons/_vendor/oca_knowledge
 echo "_vendor/oca_knowledge/document_page" >> selection.txt
 make selection            # build _selected symlinks (commit them)
+                          # + stubs a why-line in selection_reasons.md — write it,
+                          # pre-commit fails on missing/TODO entries
 
 cp .env.example .env      # then edit secrets
 make up                   # dev stack (ports, live mount, reload)
@@ -223,6 +240,7 @@ Next:
   2. Put first-party modules in src/custom_addons/
   3. Add vendor repos: git submodule add -b 18.0 <url> src/third_party_addons/_vendor/<name>
      then list modules in selection.txt and run: make selection
+     (then write the why-lines it stubs into selection_reasons.md)
   4. Set OWN_MODULES in the Makefile
   5. Create the GitHub repo and push:
        gh repo create <owner>/${NAME} --private --source=. --remote=origin --push

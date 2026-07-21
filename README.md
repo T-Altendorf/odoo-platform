@@ -77,6 +77,28 @@ Then `make selection` regenerates `src/third_party_addons/_selected/` (relative
 symlinks, stale links pruned) — **commit the symlinks**; deploys and fresh
 clones need no build step.
 
+## Documenting the selection (selection_reasons.md)
+
+Every module a product loads — vendor modules from `selection.txt` **and**
+first-party modules in `src/custom_addons/` — needs a one-line reason in the
+product's `selection_reasons.md`:
+
+```
+- `module_name` — why this product needs it.
+```
+
+Group the entries **by concern** (bank sync, invoicing, UI, …), not by vendor
+repo — the file answers "what does our stack do and why", the vendor is
+visible in `selection.txt` anyway. The workflow is automated at both ends:
+
+* `make selection` appends a `TODO` stub for every undocumented module into
+  the file's marked "unsorted" section (creating the file on first run). Move
+  each stub to its concern section and replace the TODO with the reason.
+* The pre-commit hook (`make hooks`, once per clone; `init-product.sh` does it
+  for the scaffold clone) runs `scripts/selection-reasons.sh --check` and
+  **fails the commit** while any loaded module is missing or still TODO.
+  `make reasons` runs the same check on demand.
+
 ## Keeping submodules fresh (auto-bump PRs)
 
 `init-product.sh` also drops in `.github/workflows/watch-submodules.yml`, a

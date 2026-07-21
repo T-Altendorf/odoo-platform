@@ -108,8 +108,18 @@ check: ## Verify src/ layout (only custom_addons + third_party_addons)
 	bash platform/scripts/check-layout.sh
 
 .PHONY: selection
-selection: check ## Regenerate src/third_party_addons/_selected from selection.txt
+selection: check ## Regenerate _selected from selection.txt + stub selection_reasons.md
 	bash platform/scripts/build-selection.sh
+	bash platform/scripts/selection-reasons.sh --sync
+
+.PHONY: reasons
+reasons: ## Verify every loaded module has a why-line in selection_reasons.md
+	bash platform/scripts/selection-reasons.sh --check
+
+.PHONY: hooks
+hooks: ## Install the repo pre-commit checks (layout + selection reasons)
+	git config core.hooksPath platform/githooks
+	@echo "pre-commit checks active (git config core.hooksPath platform/githooks)"
 
 # SSH submodule URLs exist for the deploy pipeline (Dokploy pulls them with a
 # server-side SSH key). Local dev machines authenticate via gh over HTTPS, so
