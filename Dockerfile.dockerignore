@@ -50,3 +50,5 @@ platform/docker-compose.nginx.yml
 platform/deploy/
 platform/Makefile
 platform/scripts/
+# ...except the manifest-deps collector, which the pip layer bind-mounts.
+!platform/scripts/manifest-pydeps.py
