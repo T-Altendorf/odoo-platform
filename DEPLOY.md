@@ -99,6 +99,9 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
    - *Compose labels:* set `DOMAIN` in env, uncomment the Traefik `labels` +
      `networks` blocks in `docker-compose.yml`. The second router sends
      `/websocket` to `GEVENT_PORT` — same split as the two UI entries above.
+
+   Multi-db stack (e.g. prod + staging): repeat the domain pair for **every**
+   host and set `DBFILTER=^%d$` — see *Host → database routing* below.
 4. **Deploy.** On boot the entrypoint renders the config, waits for Postgres,
    creates any `INIT_DB` databases, upgrades every `UPGRADE_DB` database, and
    serves. Missing dbs in `UPGRADE_DB` are skipped (never auto-created).
@@ -259,9 +262,79 @@ Two things that do **not** work, both verified the hard way:
 > `COMPOSE_FILE`. Verify on the target app that the ports really appear before
 > relying on this there; the `.env` route is what the Makefile/CLI uses.
 
-Multi-tenant: your nginx sends `X-Odoo-dbfilter ^UUs.*` (the `dbfilter_from_header`
-module). `DB_NAME=False` is the default. List your tenant dbs in `UPGRADE_DB`
-(e.g. `UPGRADE_DB=UUs,UUs_Test`) so boot-time `-u` runs on each.
+### Host → database routing (multi-db, staging subdomains)
+
+Odoo picks the database **per request, before URL routing**, from exactly two
+sources (`_get_session_and_dbname` in `odoo/http.py`): the session cookie, or —
+for fresh sessions — *"exactly one db matches the dbfilter"*. The `?db=` query
+param only helps on `auth='none'` routes (`/web/login`, the db manager), where
+`ensure_db()` seeds the session. Emailed links — `/web/signup` invitations,
+`/web/reset_password` — are `auth='public'` routes, which **do not exist** for
+a db-less request. Consequence, verified the hard way: with two dbs and
+`DBFILTER=.*`, every invitation/reset link 404s for anyone without a session
+cookie; deleting the second db "fixes" it because the exactly-one path fires
+again. Multiple dbs on **one** hostname can therefore never fully work — the
+mapping host → db must be unique.
+
+**Standard scheme — subdomain == db name:**
+
+```bash
+DB_NAME=False
+DBFILTER=^%d$
+```
+
+`%d` is the first DNS label of the request host (`odoo.example.com` → `odoo`,
+`odoo-staging.example.com` → `odoo-staging`); `%h` would be the full host.
+Each host then matches exactly one db, with zero proxy configuration. Rules:
+
+* db names **lowercase**, equal to the subdomain (hostnames arrive lowercase
+  and the regex match is case-sensitive; `(?i)^%d$` tolerates legacy casing).
+* every host needs its own Dokploy domain pair (`/` → 8069, `/websocket` → 8072).
+* fleet convention: prod db `odoo` @ `odoo.example.com`, staging db
+  `odoo-staging` @ `odoo-staging.example.com` — same container, same Postgres,
+  mutually invisible before login. Refresh staging with
+  `make dbtest from=odoo to=odoo-staging` (then neutralize mail/crons).
+* list all of them in `UPGRADE_DB=odoo,odoo-staging` so boot upgrades hit each.
+
+**Alternative — free-form db names (`dbfilter_from_header`):** keeps any db
+name; the proxy maps host → filter via a request header (this replaces the old
+host-nginx `proxy_set_header X-Odoo-dbfilter` vhost setup). Needs the module
+in `server_wide_modules` (`base,web,dbfilter_from_header`), `PROXY_MODE=True`,
+and a per-host Traefik `headers` middleware. Dokploy's Domains UI cannot attach
+middlewares — use compose labels (note `$$` escapes `$` in compose):
+
+```yaml
+labels:
+  - "traefik.http.middlewares.acme-dbf.headers.customrequestheaders.X-Odoo-Dbfilter=^AcmeProd$$"
+  - "traefik.http.routers.acme.rule=Host(`acme.example.com`)"
+  - "traefik.http.routers.acme.middlewares=acme-dbf"
+  # + entrypoints/tls/service lines, and a second /websocket router per host
+  #   with the SAME middleware (else live chat lands on the wrong db)
+```
+
+Prefer the subdomain scheme: nothing can strip it, no server-wide module, and
+db names double as documentation. Use the header only where a rename is truly
+impossible.
+
+**Renaming a db to fit the scheme:** Odoo 18's manager UI has no rename
+button, but the RPC service still has one — it renames the database **and**
+its filestore in one call (`exp_rename`). It is gated by db management, so
+temporarily set `LIST_DB=True`, redeploy, then:
+
+```bash
+curl -s https://odoo.example.com/jsonrpc -H 'Content-Type: application/json' -d '{
+  "jsonrpc":"2.0","method":"call",
+  "params":{"service":"db","method":"rename",
+            "args":["<ADMIN_PASSWD>","OldName","odoo"]}}'
+```
+
+Set `LIST_DB=False` again and update `DB_NAME`/`DBFILTER`/`UPGRADE_DB`
+references. Manual equivalent (odoo stopped):
+`ALTER DATABASE "OldName" RENAME TO "odoo"` **plus**
+`mv $DATA_DIR/filestore/OldName $DATA_DIR/filestore/odoo` — forget the second
+and every attachment/asset 404s. Don't backup/restore just to rename (slowest
+path, same result). Either way sessions are invalidated (users re-login) and
+**already-emailed links embed the old db name — re-send open invitations**.
 
 ### Databases, the manager, and a test/staging instance
 
@@ -276,7 +349,7 @@ Recommended layout — **prod stays locked, a second app is your admin/test cons
 |---|---|---|
 | `DOMAIN` | odoo.example.com | test.example.com |
 | `DB_NAME` | `False` | `False` |
-| `DBFILTER` | `^prod$` (or via header) | `.*` (manager lists every DB) |
+| `DBFILTER` | `^%d$` (subdomain == db, see above) | `.*` (manager lists every DB) |
 | `LIST_DB` | `False` (clean, no manager) | `True` (DB manager enabled) |
 | `UPGRADE_DB` | `prod` | `test` |
 | `WORKERS` | `2` | `0` (cheap) |

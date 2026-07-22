@@ -12,10 +12,16 @@ set -euo pipefail
 : "${DB_MAXCONN:=64}"
 : "${LIST_DB:=False}"
 # Empty/unset -> derive from DB_NAME. If DB_NAME=False (multi-db), default to
-# .* so the dbfilter_from_header module or Odoo's own selector can handle it.
+# .* — but with 2+ dbs that breaks emailed signup/reset links (a fresh session
+# only gets a db when EXACTLY ONE matches). Multi-db deployments must set
+# DBFILTER explicitly, normally ^%d$ (subdomain == db name) — see DEPLOY.md
+# "Host -> database routing".
 if [ -z "${DBFILTER:-}" ]; then
     if [ "$DB_NAME" = "False" ]; then
         DBFILTER=".*"
+        echo "[entrypoint] WARNING: DB_NAME=False and no DBFILTER -> '.*'." \
+             "Fine with a single db; with several, db-less requests (emailed" \
+             "signup/reset links) 404. Set DBFILTER=^%d\$ (see DEPLOY.md)." >&2
     else
         DBFILTER="^${DB_NAME}\$"
     fi

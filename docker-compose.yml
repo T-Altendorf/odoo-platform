@@ -66,7 +66,7 @@ services:
       DB_USER: ${DB_USER:-odoo}
       DB_PASSWORD: ${DB_PASSWORD:-odoo}
       DB_NAME: ${DB_NAME:-False}
-      DBFILTER: ${DBFILTER:-}
+      DBFILTER: ${DBFILTER:-}   # host->db routing; multi-db needs ^%d$ (DEPLOY.md)
       LIST_DB: ${LIST_DB:-False}
       ADMIN_PASSWD: ${ADMIN_PASSWD:-admin}
       HTTP_PORT: ${HTTP_PORT:-8069}
@@ -119,6 +119,11 @@ services:
     #   - "traefik.http.routers.odoo-ws.tls.certresolver=letsencrypt"
     #   - "traefik.http.services.odoo-ws.loadbalancer.server.port=${GEVENT_PORT:-8072}"
     # networks: [default, dokploy-network]
+    #
+    # Multi-db stack: one router pair per host; with DBFILTER=^%d$ (subdomain
+    # == db name) no extra labels are needed. Free-form db names instead need
+    # dbfilter_from_header + a per-host headers middleware — see DEPLOY.md
+    # "Host -> database routing".
 
 volumes:
   db-data:
