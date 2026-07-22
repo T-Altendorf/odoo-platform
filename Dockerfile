@@ -28,7 +28,10 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
 
 # Install python requirements.
 #   - every third_party_addons/{_vendor,_static_vendor}/*/requirements.txt
-#   - the product-root requirements.txt (own / custom extras)
+#   - manifest external_dependencies for modules NOT covered by any
+#     requirements.txt (Cybrosys etc. ship none — see manifest-pydeps.py)
+#   - the product-root requirements.txt (own / custom extras) — installed
+#     LAST so product pins win
 # Set INSTALL_VENDOR_REQS=0 to skip vendor reqs for a slim, fast build.
 ARG INSTALL_VENDOR_REQS=1
 
@@ -39,6 +42,7 @@ ARG INSTALL_VENDOR_REQS=1
 RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
     --mount=type=bind,source=src/third_party_addons/_vendor,target=/tmp/src/third_party_addons/_vendor \
     --mount=type=bind,source=src/third_party_addons/_static_vendor,target=/tmp/src/third_party_addons/_static_vendor \
+    --mount=type=bind,source=platform/scripts/manifest-pydeps.py,target=/tmp/src/manifest-pydeps.py \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
     # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL
@@ -49,6 +53,17 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
              /tmp/src/third_party_addons/_static_vendor \
              -maxdepth 2 -name requirements.txt -print \
              -exec pip install --break-system-packages -r {} \; ; \
+        # Fallback: manifest external_dependencies for modules with no
+        # requirements.txt anywhere between them and their vendor root.
+        # Odoo 18 checks these names against installed dist metadata, so
+        # pip-installing them verbatim is exactly what the check expects.
+        python3 /tmp/src/manifest-pydeps.py \
+             /tmp/src/third_party_addons/_vendor \
+             /tmp/src/third_party_addons/_static_vendor \
+             > /tmp/manifest-reqs.txt; \
+        if [ -s /tmp/manifest-reqs.txt ]; then \
+            pip install --break-system-packages -r /tmp/manifest-reqs.txt; \
+        fi; \
     fi; \
     if [ -f /tmp/src/requirements.txt ]; then \
         pip install --break-system-packages -r /tmp/src/requirements.txt; \
