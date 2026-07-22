@@ -113,12 +113,13 @@ DB_NAME=False
 # Host -> db routing. REQUIRED when DB_NAME=False and more than one db exists:
 # a fresh session (emailed /web/signup and /web/reset_password links!) only
 # gets a db when EXACTLY ONE db matches the filter — with the .* fallback and
-# 2+ dbs those links 404. Standard scheme: subdomain == db name (lowercase):
-#   odoo.example.com -> db "odoo", odoo-staging.example.com -> db "odoo-staging"
-# %d = first DNS label of the request host. Alternative for free-form db names
-# (dbfilter_from_header + per-host Traefik header): platform/DEPLOY.md
-# "Host -> database routing".
-# DBFILTER=^%d$
+# 2+ dbs those links 404. Standard scheme: subdomain == db name, ignoring case:
+#   odoo.example.com -> db "odoo", odoo-staging.example.com -> db "odoo-staging",
+#   altendorfit.example.com -> db "AltendorfIT" (no rename for case mismatches;
+#   don't keep two dbs differing only by case). %d = first DNS label of the
+# request host. Alternative for free-form db names (dbfilter_from_header +
+# per-host Traefik header): platform/DEPLOY.md "Host -> database routing".
+# DBFILTER=(?i)^%d$
 LIST_DB=False
 DB_EXPOSE_PORT=5432
 

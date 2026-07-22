@@ -14,14 +14,14 @@ set -euo pipefail
 # Empty/unset -> derive from DB_NAME. If DB_NAME=False (multi-db), default to
 # .* — but with 2+ dbs that breaks emailed signup/reset links (a fresh session
 # only gets a db when EXACTLY ONE matches). Multi-db deployments must set
-# DBFILTER explicitly, normally ^%d$ (subdomain == db name) — see DEPLOY.md
-# "Host -> database routing".
+# DBFILTER explicitly, normally (?i)^%d\$ (subdomain == db name, any case) —
+# see DEPLOY.md "Host -> database routing".
 if [ -z "${DBFILTER:-}" ]; then
     if [ "$DB_NAME" = "False" ]; then
         DBFILTER=".*"
         echo "[entrypoint] WARNING: DB_NAME=False and no DBFILTER -> '.*'." \
              "Fine with a single db; with several, db-less requests (emailed" \
-             "signup/reset links) 404. Set DBFILTER=^%d\$ (see DEPLOY.md)." >&2
+             "signup/reset links) 404. Set DBFILTER=(?i)^%d\$ (see DEPLOY.md)." >&2
     else
         DBFILTER="^${DB_NAME}\$"
     fi

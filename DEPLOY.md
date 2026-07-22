@@ -101,7 +101,7 @@ hot-reloads (`--dev=reload,qweb,xml`). Useful targets (`make help`):
      `/websocket` to `GEVENT_PORT` — same split as the two UI entries above.
 
    Multi-db stack (e.g. prod + staging): repeat the domain pair for **every**
-   host and set `DBFILTER=^%d$` — see *Host → database routing* below.
+   host and set `DBFILTER=(?i)^%d$` — see *Host → database routing* below.
 4. **Deploy.** On boot the entrypoint renders the config, waits for Postgres,
    creates any `INIT_DB` databases, upgrades every `UPGRADE_DB` database, and
    serves. Missing dbs in `UPGRADE_DB` are skipped (never auto-created).
@@ -276,19 +276,23 @@ cookie; deleting the second db "fixes" it because the exactly-one path fires
 again. Multiple dbs on **one** hostname can therefore never fully work — the
 mapping host → db must be unique.
 
-**Standard scheme — subdomain == db name:**
+**Standard scheme — subdomain == db name (case-insensitive):**
 
 ```bash
 DB_NAME=False
-DBFILTER=^%d$
+DBFILTER=(?i)^%d$
 ```
 
 `%d` is the first DNS label of the request host (`odoo.example.com` → `odoo`,
 `odoo-staging.example.com` → `odoo-staging`); `%h` would be the full host.
-Each host then matches exactly one db, with zero proxy configuration. Rules:
+Each host then matches exactly one db, with zero proxy configuration. The
+`(?i)` makes the match case-insensitive: hostnames always arrive lowercase,
+so a legacy mixed-case db (`AltendorfIT` @ `altendorfit.example.com`) works
+**without a rename** — renames are only needed when the *name* differs, not
+the case. (Plain `^%d$` if you prefer enforcing lowercase db names.) Rules:
 
-* db names **lowercase**, equal to the subdomain (hostnames arrive lowercase
-  and the regex match is case-sensitive; `(?i)^%d$` tolerates legacy casing).
+* subdomain must equal the db name ignoring case — and never keep two dbs
+  differing only by case, both would match.
 * every host needs its own Dokploy domain pair (`/` → 8069, `/websocket` → 8072).
 * fleet convention: prod db `odoo` @ `odoo.example.com`, staging db
   `odoo-staging` @ `odoo-staging.example.com` — same container, same Postgres,
@@ -349,7 +353,7 @@ Recommended layout — **prod stays locked, a second app is your admin/test cons
 |---|---|---|
 | `DOMAIN` | odoo.example.com | test.example.com |
 | `DB_NAME` | `False` | `False` |
-| `DBFILTER` | `^%d$` (subdomain == db, see above) | `.*` (manager lists every DB) |
+| `DBFILTER` | `(?i)^%d$` (subdomain == db, see above) | `.*` (manager lists every DB) |
 | `LIST_DB` | `False` (clean, no manager) | `True` (DB manager enabled) |
 | `UPGRADE_DB` | `prod` | `test` |
 | `WORKERS` | `2` | `0` (cheap) |

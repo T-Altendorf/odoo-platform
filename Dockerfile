@@ -11,11 +11,23 @@ FROM ${ODOO_IMAGE}
 
 USER root
 
+# Canonical's archive can be congested or blackholed from some hosting
+# providers (Jul 2026: from netcup, archive.ubuntu.com port 80 was dead and
+# HTTPS crawled at ~0.3MB/s while German mirrors ran 10-20MB/s). Set
+# APT_MIRROR (e.g. https://mirror.23m.com/ubuntu or http://ftp.fau.de/ubuntu)
+# to rewrite the archive+security URIs; empty keeps Canonical upstream.
+ARG APT_MIRROR=
+
 # Build deps for python wheels that some vendor modules need (cryptography,
 # paramiko, PyMuPDF, numpy, ...). gettext-base gives us `envsubst` at runtime.
 # NOTE: don't add libpq-dev — the odoo image already ships libpq5 from the PGDG
 # repo (newer than Ubuntu's), and libpq-dev would force a conflicting downgrade.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    if [ -n "$APT_MIRROR" ]; then \
+        sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu#$APT_MIRROR#g" \
+            /etc/apt/sources.list.d/ubuntu.sources; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         gettext-base \
     && rm -rf /var/lib/apt/lists/*
