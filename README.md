@@ -10,6 +10,8 @@ A *product repo* owns only its content:
 product-repo/
 ├── platform/                  <-- THIS repo (submodule)
 ├── docker-compose.yml         <-- symlink -> platform/docker-compose.yml (see DEPLOY.md)
+├── AGENTS.md                  <-- symlink -> platform/AGENTS.md (AI-agent rules)
+├── docs/                      <-- dated decision records (mandatory, see below)
 ├── Makefile                   <-- 2 lines (config + include, below)
 ├── selection.txt              <-- which vendor modules to load
 ├── requirements.txt           <-- extra python deps for own modules
@@ -99,6 +101,31 @@ visible in `selection.txt` anyway. The workflow is automated at both ends:
   **fails the commit** while any loaded module is missing or still TODO.
   `make reasons` runs the same check on demand.
 
+## Decision records (docs/decisions — mandatory)
+
+Every product repo keeps dated decision records under `docs/decisions/`
+(scaffolded by `init-product.sh` from `templates/docs-README.md`). Whenever a
+change alters *what the product does* — module selection, workflow design,
+infrastructure, integration behavior — a record
+`docs/decisions/YYYY-MM-DD-short-slug.md` is written **in the same commit (or
+PR) as the change**. This is a practice we always follow, not an option.
+
+- Structure loosely as: **Context**, **Findings**, **Decision** (incl.
+  rejected alternatives), **Consequences / follow-ups**.
+- Index every record in `docs/README.md`.
+- Never rewrite old records — add a new one and link back; a superseded
+  record still explains why the old state existed.
+- `selection_reasons.md` answers *what* is loaded and why in one line;
+  decision records hold the *reasoning and rejected alternatives* behind
+  those lines and everything else.
+
+Platform changes that alter behavior get their record in the affected
+product repo(s) — this repo stays product-agnostic machinery.
+
+AI coding agents are bound to this practice (and to the shared working
+rules) via [AGENTS.md](AGENTS.md), which every product repo exposes at its
+root as a symlink to `platform/AGENTS.md`.
+
 ## Keeping submodules fresh (auto-bump PRs)
 
 `init-product.sh` also drops in `.github/workflows/watch-submodules.yml`, a
@@ -132,6 +159,8 @@ To activate it in a product repo:
 * Product-specific knobs (`OWN_MODULES`, `UPGRADE_MODULES`, image name, PG
   tuning `PG_*`) live in the product's Makefile/.env — this repo has **no**
   product defaults.
+* **ALWAYS** write a `docs/decisions/` record in the same commit as any
+  change to what a product does (see "Decision records" above).
 
 ## Day-to-day (run in the product repo root)
 

@@ -45,6 +45,16 @@ touch src/custom_addons/.gitkeep \
       src/third_party_addons/_selected/.gitkeep
 
 # --- thin config files -------------------------------------------------------
+# --- docs/decisions + AGENTS.md ----------------------------------------------
+# Decision records are mandatory (see platform/README.md "Decision records").
+# The docs README is a product-owned COPY (the product edits its index);
+# AGENTS.md is a SYMLINK so platform bumps keep agent rules current everywhere.
+mkdir -p docs/decisions
+cp "$SCRIPT_DIR/../templates/docs-README.md" docs/README.md
+touch docs/decisions/.gitkeep
+ln -s platform/AGENTS.md AGENTS.md
+echo "    added docs/decisions + AGENTS.md"
+
 # Root compose is a SYMLINK to the platform stack — NOT an `include:` wrapper.
 # Dokploy's domain UI parses the compose statically and does not expand
 # `include:`, so a wrapper hides the services ("service odoo does not exist").
@@ -146,7 +156,7 @@ DEBUGPY_WAIT=
 
 # --- Domain ------------------------------------------------------------------
 # One subdomain per database (see DBFILTER above). Every host needs BOTH
-# Dokploy domain entries (`/` -> 8069 and `/websocket` -> 8072) or the Traefik
+# Dokploy domain entries (\`/\` -> 8069 and \`/websocket\` -> 8072) or the Traefik
 # labels in platform/docker-compose.yml.
 DOMAIN=odoo.example.com
 # staging db "odoo-staging" would be served at odoo-staging.example.com
@@ -206,6 +216,14 @@ cp .env.example .env      # then edit secrets
 make up                   # dev stack (ports, live mount, reload)
 \`\`\`
 
+## Decision records (mandatory)
+
+Any change to what this product does (module selection, workflow design,
+infrastructure) gets a dated record in \`docs/decisions/\` — written **in the
+same commit/PR as the change**. Convention + index: [docs/README.md](docs/README.md);
+rationale: platform/README.md "Decision records". AI agents follow the same
+rule via [AGENTS.md](AGENTS.md) (symlink into the platform).
+
 ## Updating vendor submodules
 \`\`\`bash
 make submodules           # bump every _vendor submodule to latest upstream
@@ -258,6 +276,8 @@ Next:
      then list modules in selection.txt and run: make selection
      (then write the why-lines it stubs into selection_reasons.md)
   4. Set OWN_MODULES in the Makefile
+     (and from now on: every behavior change ships with a docs/decisions/
+     record in the same commit — see docs/README.md)
   5. Create the GitHub repo and push:
        gh repo create <owner>/${NAME} --private --source=. --remote=origin --push
   6. Point Dokploy at it (recursive submodule clone + private-repo auth).
