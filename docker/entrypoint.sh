@@ -228,6 +228,20 @@ if [ -n "$UPGRADE_DB" ] && [ "$UPGRADE_DB" != "False" ]; then
             if ! module_installed "$_db" module_auto_update; then
                 echo "[entrypoint] installing module_auto_update (db=${_db})"
                 odoo -c "$ODOO_RC" -d "$_db" -i module_auto_update --stop-after-init
+                # `odoo -i` exits 0 for a module that is not on addons_path — it
+                # only logs "invalid module names, ignored". Without this check
+                # the install is silently retried every boot and `auto` mode
+                # never upgrades anything, which shows up much later as a stale
+                # column ("column x does not exist") in a restart loop.
+                if ! module_installed "$_db" module_auto_update; then
+                    echo "[entrypoint] ERROR: module_auto_update is not installed after -i" >&2
+                    echo "[entrypoint]        (db=${_db}). It is almost certainly not on" >&2
+                    echo "[entrypoint]        addons_path: add it to selection.txt and run" >&2
+                    echo "[entrypoint]        'make selection'. UPGRADE_MODULES=auto cannot" >&2
+                    echo "[entrypoint]        work without it — use an explicit module list" >&2
+                    echo "[entrypoint]        (or 'all') meanwhile." >&2
+                    exit 1
+                fi
             fi
             # NOTE: the first run after install upgrades everything (no saved
             # hashes yet) — by design, it errs toward safety. Later runs are cheap.
