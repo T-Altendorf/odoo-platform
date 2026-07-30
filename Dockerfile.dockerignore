@@ -26,8 +26,13 @@
 **/.pylintrc
 
 # === Vendor: strip translation catalogs and pot templates ===
+# Vendor catalogs are dead weight (we run one or two languages), but the
+# product's OWN catalogs are the product: without them a first-party module
+# ships English-only and nobody notices until it is in front of the customer.
 **/i18n/
 **/*.pot
+!src/custom_addons/**/i18n
+!src/custom_addons/**/i18n/**
 
 # === Docs not needed at runtime ===
 **/doc/
@@ -50,5 +55,7 @@ platform/docker-compose.nginx.yml
 platform/deploy/
 platform/Makefile
 platform/scripts/
-# ...except the manifest-deps collector, which the pip layer bind-mounts.
+# ...except the two dependency helpers the build itself needs: the collector
+# the pip layer bind-mounts, and the guard that verifies the result.
 !platform/scripts/manifest-pydeps.py
+!platform/scripts/check-pydeps.py
