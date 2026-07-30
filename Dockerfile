@@ -60,11 +60,29 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
     # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL
     # BEFORE running the vendor requirements, preventing the GEN_EMAIL crash.
     pip install --break-system-packages --ignore-installed typing-extensions pyOpenSSL; \
-    if [ "$INSTALL_VENDOR_REQS" = "1" ] && [ -d /tmp/src/third_party_addons ]; then \
+    # Only an explicit 0/false switches the dependency install off. A value
+    # that arrives with its .env comment attached ("1  # install every ...")
+    # used to compare unequal to "1" and silently skipped EVERY python dep,
+    # producing an image that builds green and crashes at registry load with a
+    # bare ModuleNotFoundError. Fail loud or work: never silently skip.
+    case "${INSTALL_VENDOR_REQS}" in \
+        0|0[!0-9]*|false|False|FALSE|no|off) vendor_reqs=0 ;; \
+        *) vendor_reqs=1 ;; \
+    esac; \
+    echo "[build] INSTALL_VENDOR_REQS='${INSTALL_VENDOR_REQS}' -> vendor requirements $([ "$vendor_reqs" = 1 ] && echo ON || echo OFF)"; \
+    if [ "$vendor_reqs" = "1" ] && [ -d /tmp/src/third_party_addons ]; then \
+        # Not `find -exec`: that swallows a failing pip (find's own exit
+        # status is what `set -e` sees), so a dep could quietly not install.
         find /tmp/src/third_party_addons/_vendor \
              /tmp/src/third_party_addons/_static_vendor \
-             -maxdepth 2 -name requirements.txt -print \
-             -exec pip install --break-system-packages -r {} \; ; \
+             -maxdepth 2 -name requirements.txt > /tmp/vendor-reqs.list; \
+        count=0; \
+        while read -r req; do \
+            echo "[build] pip install -r $req"; \
+            pip install --break-system-packages -r "$req"; \
+            count=$((count + 1)); \
+        done < /tmp/vendor-reqs.list; \
+        echo "[build] $count vendor requirements file(s) installed"; \
         # Fallback: manifest external_dependencies for modules with no
         # requirements.txt anywhere between them and their vendor root.
         # Odoo 18 checks these names against installed dist metadata, so
@@ -119,6 +137,17 @@ RUN set -eu; \
         exit 1; \
     fi; \
     echo "[build] _selected symlinks all resolve — submodules present"
+
+# Guard: every module that can be loaded must have its python deps installed.
+# Odoo only checks external_dependencies when a module is INSTALLED; a module
+# already installed in a database is imported at registry load, so a missing
+# dep is not a failed install, it is a server that will not boot. Catch it here
+# instead of at 3am in production.
+COPY platform/scripts/check-pydeps.py /tmp/check-pydeps.py
+RUN python3 /tmp/check-pydeps.py \
+        /opt/extra-addons/custom_addons \
+        /opt/extra-addons/third_party_addons/_selected \
+    && rm -f /tmp/check-pydeps.py
 
 COPY platform/docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY platform/docker/entrypoint.sh /usr/local/bin/odoo-entrypoint.sh
