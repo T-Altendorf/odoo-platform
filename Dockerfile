@@ -57,9 +57,15 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
     --mount=type=bind,source=platform/scripts/manifest-pydeps.py,target=/tmp/src/manifest-pydeps.py \
     --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
-    # FIX: Surgically bypass the Debian lock for typing-extensions and upgrade pyOpenSSL
-    # BEFORE running the vendor requirements, preventing the GEN_EMAIL crash.
-    pip install --break-system-packages --ignore-installed typing-extensions pyOpenSSL; \
+    # Debian-packaged dists have no RECORD file, so pip cannot UNINSTALL them:
+    # the moment a vendor requirement wants a newer version, the whole install
+    # dies with "Cannot uninstall X, RECORD file not found". Installing them
+    # first with --ignore-installed puts a pip-managed copy in /usr/local
+    # (which precedes dist-packages on sys.path) that pip may replace later.
+    # typing-extensions/pyOpenSSL: the GEN_EMAIL crash. idna: pulled >=3.18 by
+    # httpx2 via mcp.
+    pip install --break-system-packages --ignore-installed \
+        typing-extensions pyOpenSSL idna; \
     # Only an explicit 0/false switches the dependency install off. A value
     # that arrives with its .env comment attached ("1  # install every ...")
     # used to compare unequal to "1" and silently skipped EVERY python dep,
@@ -79,7 +85,15 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/src/requirements.txt \
         count=0; \
         while read -r req; do \
             echo "[build] pip install -r $req"; \
-            pip install --break-system-packages -r "$req"; \
+            # Retry once ignoring installed dists: the same Debian RECORD
+            # problem can surface for any package the base image ships, and
+            # naming them one by one above is whack-a-mole. --ignore-installed
+            # skips the uninstall step entirely (costs a few duplicate
+            # packages, only on the file that actually needed it).
+            pip install --break-system-packages -r "$req" || { \
+                echo "[build] retrying $req with --ignore-installed"; \
+                pip install --break-system-packages --ignore-installed -r "$req"; \
+            }; \
             count=$((count + 1)); \
         done < /tmp/vendor-reqs.list; \
         echo "[build] $count vendor requirements file(s) installed"; \
