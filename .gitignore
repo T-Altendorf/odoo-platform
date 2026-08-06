@@ -1,0 +1,4 @@
+# Byte-compiled files. docker/healthcheck.py is importable, so running or
+# testing it locally drops a __pycache__ next to it.
+__pycache__/
+*.py[cod]
