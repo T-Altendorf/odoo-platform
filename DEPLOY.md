@@ -425,11 +425,28 @@ than being silently skipped. Odoo cascades an upgrade to dependent modules, and
 vendor submodule bumps change file hashes, so both are caught automatically.
 
 The entrypoint installs `module_auto_update` on first use (a cheap SQL check
-avoids booting Odoo just to find out), then runs, in-process via `odoo shell`:
+avoids booting Odoo just to find out), then runs, with Odoo imported as a
+library:
 
 ```python
 env['ir.module.module'].upgrade_changed_checksum()
 ```
+
+This deliberately does **not** go through `odoo shell`. The shell builds its
+session by calling `res.users.context_get()` *before* it reads the piped-in
+script, and that read prefetches every stored `res.partner` column. So the first
+boot after a module adds a stored field to a core model, the shell would die on
+`column ... does not exist` before it could run the upgrade that adds that very
+column — a boot loop where the schema fix needs the schema it is there to fix.
+Loading the registry as a library reads no business data, so the upgrade always
+gets to run.
+
+If the checksum upgrade fails anyway, the entrypoint falls back to a full
+`odoo -u all --stop-after-init`, then re-saves the hashes so the next boot is
+cheap again. `-u all` syncs every schema during registry load, before a row is
+read, so it cannot deadlock the same way. It is slow, but it only runs when the
+cheap path has already failed — never on a normal boot. If the fallback fails
+too, the boot aborts rather than serving a half-upgraded database.
 
 > First run after enabling `auto` upgrades **everything** — there are no saved
 > hashes yet, and the module deliberately errs toward safety. Subsequent boots

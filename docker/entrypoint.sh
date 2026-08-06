@@ -173,6 +173,44 @@ module_installed() {
         "$1" 2>/dev/null | grep -q 1
 }
 
+# _mau_call <db> <method> — call an ir.module.module method with Odoo as a
+# library.
+#
+# Deliberately NOT `odoo shell`. The shell builds its session by calling
+# res.users.context_get() BEFORE it reads the piped-in script (odoo/cli/shell.py),
+# and that read prefetches every stored res.partner column in one query. So the
+# moment a module adds a new stored field to a core model, the shell dies on
+# "column ... does not exist" before it can run the upgrade that would ADD that
+# column — the schema fix needs the schema it is there to fix. That deadlock
+# shows up as a boot loop on the first deploy after the field lands.
+#
+# Library mode has no such bootstrap: loading the registry reads no business
+# data, so the upgrade always gets a chance to run.
+_mau_call() {
+    python3 - "$ODOO_RC" "$1" "$2" <<'PYEOF'
+import sys
+import threading
+
+import odoo
+from odoo.modules.registry import Registry
+
+conf, db, method = sys.argv[1], sys.argv[2], sys.argv[3]
+# setup_logging=True mirrors every odoo CLI command: it installs the log handler
+# (so the upgrade's own progress reaches the deploy log) and avoids the
+# PendingDeprecationWarning Odoo 18 raises when the choice is left implicit.
+# parse_config also runs initialize_sys_path(), which is what puts addons_path
+# in place — without it the registry cannot find our modules at all.
+odoo.tools.config.parse_config(["-c", conf], setup_logging=True)
+# Only so log lines carry the db name instead of '?' (netsvc reads it off the
+# current thread); the registry below is addressed explicitly.
+threading.current_thread().dbname = db
+with Registry(db).cursor() as cr:
+    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
+    getattr(env["ir.module.module"], method)()
+    cr.commit()
+PYEOF
+}
+
 # INIT_DB: one-shot fresh database creation (set once, then clear).
 if [ -n "$INIT_DB" ] && [ "$INIT_DB" != "False" ]; then
     IFS=',' read -ra _init_dbs <<< "$INIT_DB"
@@ -196,11 +234,27 @@ if [ -n "$INIT_DB" ] && [ "$INIT_DB" != "False" ]; then
             esac
             [ -n "${INSTALL_MODULES}" ] && install_list="${install_list},${INSTALL_MODULES}"
             odoo -c "$ODOO_RC" -d "$_db" -i "$install_list" --stop-after-init
-            odoo shell -c "$ODOO_RC" -d "$_db" --no-http <<PYEOF
-admin = env['res.users'].browse(2)
-admin.password = '$ODOO_ADMIN_PASSWORD'
-env.cr.commit()
-print(f"[entrypoint] admin password set for {admin.login}")
+            # Library mode, not `odoo shell`, for the reason spelled out on
+            # _mau_call above. The password goes through the environment rather
+            # than argv so it does not show up in `ps`.
+            ODOO_ADMIN_PASSWORD="$ODOO_ADMIN_PASSWORD" \
+                python3 - "$ODOO_RC" "$_db" <<'PYEOF'
+import os
+import sys
+import threading
+
+import odoo
+from odoo.modules.registry import Registry
+
+conf, db = sys.argv[1], sys.argv[2]
+odoo.tools.config.parse_config(["-c", conf], setup_logging=True)
+threading.current_thread().dbname = db
+with Registry(db).cursor() as cr:
+    env = odoo.api.Environment(cr, odoo.SUPERUSER_ID, {})
+    admin = env["res.users"].browse(2)
+    admin.password = os.environ["ODOO_ADMIN_PASSWORD"]
+    cr.commit()
+    print(f"[entrypoint] admin password set for {admin.login}")
 PYEOF
         fi
     done
@@ -245,15 +299,26 @@ if [ -n "$UPGRADE_DB" ] && [ "$UPGRADE_DB" != "False" ]; then
             fi
             # NOTE: the first run after install upgrades everything (no saved
             # hashes yet) — by design, it errs toward safety. Later runs are cheap.
+            #
+            # upgrade_changed_checksum() -> base.module.upgrade.upgrade_module()
+            # -> Registry.new(update_module=True), committing at each step. It
+            # saves the new hashes ONLY after the upgrade succeeds, so a failure
+            # here is always retried on the next boot — never silently skipped.
             echo "[entrypoint] checksum upgrade (db=${_db})"
-            odoo shell -c "$ODOO_RC" -d "$_db" --no-http <<'PYEOF'
-# Runs in-process: upgrade_changed_checksum() -> base.module.upgrade.upgrade_module()
-# -> Registry.new(update_module=True). Commits internally at each step.
-# An exception here propagates and exits non-zero (stdin is not a tty), so
-# `set -e` aborts the boot rather than serving a half-upgraded database.
-env['ir.module.module'].upgrade_changed_checksum()
-env.cr.commit()
-PYEOF
+            if ! _mau_call "$_db" upgrade_changed_checksum; then
+                # Correctness must not depend on the cheap path. `-u all` syncs
+                # every module's schema during registry load (update_module=True),
+                # before a single row is read, so it cannot deadlock the way a
+                # data read can. It is slow, but it only ever runs when the cheap
+                # path has ALREADY failed — never on a normal boot.
+                echo "[entrypoint] WARNING: checksum upgrade failed (db=${_db}) —" >&2
+                echo "[entrypoint]          falling back to a full 'odoo -u all'." >&2
+                odoo -c "$ODOO_RC" -d "$_db" -u all --stop-after-init
+                # Re-save hashes so the next boot is back on the cheap path.
+                _mau_call "$_db" _save_installed_checksums
+            fi
+            # `set -e` still aborts the boot if the fallback itself fails, rather
+            # than serving a half-upgraded database.
         elif [ -n "${UPGRADE_MODULES}" ]; then
             echo "[entrypoint] odoo -u ${UPGRADE_MODULES} (db=${_db})"
             odoo -c "$ODOO_RC" -d "$_db" -u "${UPGRADE_MODULES}" --stop-after-init
