@@ -475,6 +475,57 @@ UPGRADE_DB=                      # skip upgrades entirely (fast restart)
 INIT_DB=NewClient                # create a fresh db (one-shot, then clear)
 ```
 
+## Health probe
+
+The `odoo` service reports a real health status to `docker ps`. It is deliberately
+not the obvious probe, because the two obvious probes both lie.
+
+| endpoint | broken registry | broken ORM |
+|---|---|---|
+| `/web/health` | **200 pass** | **200 pass** |
+| `/web/login` | **200** (no-db fallback) | **200** |
+| `/web/manifest.webmanifest` | 404 | 500 |
+
+`/web/health` is `auth='none'` and returns `{"status": "pass"}` unconditionally;
+`?db_server_status=1` only opens a cursor on the `postgres` maintenance database.
+`/web/login` is worse: when the registry is unusable Odoo catches `RegistryError`
+and re-serves through `_serve_nodb()`, rendering a healthy-looking login form
+backed by no database. Both report success during an outage where every ORM read
+fails.
+
+So the probe uses an `auth='public'` route. `_serve_nodb()` dispatches against
+`nodb_routing_map`, which holds only `auth='none'` routes — a public route is
+absent and 404s rather than degrading quietly. Binding the public user also reads
+`res.users` → `res.partner`, the query shape that real schema drift breaks.
+
+Logic lives in `platform/docker/healthcheck.py` (uses `python3`; the image has no
+`curl`). Knobs:
+
+| var | default | notes |
+|---|---|---|
+| `HEALTHCHECK_START_PERIOD` | `300s` | must outlast the boot upgrade; failures inside it don't count |
+| `HEALTHCHECK_INTERVAL` | `30s` | |
+| `HEALTHCHECK_RETRIES` | `3` | |
+| `HEALTHCHECK_TIMEOUT` | `10` | seconds, script-side; keep below compose's `timeout: 15s` |
+| `HEALTHCHECK_HOST` | falls back to `DB_NAME` | only needed when `DB_NAME=False` — see below |
+| `HEALTHCHECK_PATH` | `/web/manifest.webmanifest` | keep it `auth='public'` or stricter |
+| `HEALTHCHECK_DISABLE` | unset | `1` turns the probe into a no-op |
+
+> **Host selection.** The probe talks to `127.0.0.1`, and `db_filter()` reduces
+> that to `%d` = `"127"` — matching no database, so a host-routed `DBFILTER`
+> would serve db-less and the probe would report a *false* failure. To avoid
+> that it sends `Host: $DB_NAME` by default. `%d` is only the first label of the
+> Host and is never resolved as a name, so the bare db name is a valid Host; it
+> is also harmless under a fixed `DBFILTER` (`^mydb$`), which ignores the host.
+>
+> Only **multi-db** (`DB_NAME=False`) needs `HEALTHCHECK_HOST` set explicitly —
+> there is no single database to infer. Left unset with a `%d`/`%h` filter, the
+> probe logs why it cannot select one instead of looking like an outage.
+
+An unhealthy container is **not** restarted — Docker only reports the status.
+Acting on it (alerting, rollback) is not built yet: see
+[odoo-platform#2](https://github.com/T-Altendorf/odoo-platform/issues/2).
+
 ## Secrets at rest (`RUNNING_ENV` / `ENCRYPTION_KEY`)
 
 Modules holding third-party credentials (API keys, PSD2 signing keys) should not

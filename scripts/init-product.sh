@@ -149,6 +149,16 @@ UPGRADE_MODULES=
 INSTALL_MODULES=
 INIT_DB=
 
+# --- Health probe ------------------------------------------------------------
+# Sane defaults are baked into platform/docker-compose.yml; uncomment to tune.
+# Raise START_PERIOD if the boot upgrade regularly takes longer than 5 min.
+# HEALTHCHECK_HOST is ONLY needed when DBFILTER routes by host (%d) — see
+# DEPLOY.md "Health probe".
+#HEALTHCHECK_START_PERIOD=300s
+#HEALTHCHECK_INTERVAL=30s
+#HEALTHCHECK_HOST=
+#HEALTHCHECK_DISABLE=
+
 # --- Debugger (dev only) -----------------------------------------------------
 DEBUG=0
 DEBUGPY_PORT=5678

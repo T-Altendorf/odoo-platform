@@ -165,7 +165,8 @@ RUN python3 /tmp/check-pydeps.py \
 
 COPY platform/docker/odoo.conf.template /etc/odoo/odoo.conf.template
 COPY platform/docker/entrypoint.sh /usr/local/bin/odoo-entrypoint.sh
-RUN chmod +x /usr/local/bin/odoo-entrypoint.sh \
+COPY platform/docker/healthcheck.py /usr/local/bin/odoo-healthcheck.py
+RUN chmod +x /usr/local/bin/odoo-entrypoint.sh /usr/local/bin/odoo-healthcheck.py \
     && chown -R odoo:odoo /opt/extra-addons /etc/odoo
 
 USER odoo

@@ -96,11 +96,35 @@ services:
       DEBUG: ${DEBUG:-0}
       DEBUGPY_PORT: ${DEBUGPY_PORT:-5678}
       DEBUGPY_WAIT: ${DEBUGPY_WAIT:-}
+      # --- Health probe (see platform/docker/healthcheck.py) ----------------
+      # Leave HEALTHCHECK_HOST empty unless multi-db: the probe falls back to
+      # DB_NAME, which satisfies a host-routed DBFILTER (%d is just the first
+      # label of the Host, never resolved). Only DB_NAME=False needs it set.
+      HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:-}
+      HEALTHCHECK_PATH: ${HEALTHCHECK_PATH:-/web/manifest.webmanifest}
+      HEALTHCHECK_TIMEOUT: ${HEALTHCHECK_TIMEOUT:-10}
+      HEALTHCHECK_DISABLE: ${HEALTHCHECK_DISABLE:-}
     volumes:
       - odoo-data:/var/lib/odoo
     expose:
       - "${HTTP_PORT:-8069}"
       - "${GEVENT_PORT:-8072}"
+    # Probes a db-requiring (auth='public') route, so a broken registry reports
+    # 404 and a broken ORM reports 500 instead of the false 200 that /web/health
+    # and /web/login both return. See platform/docker/healthcheck.py for why.
+    #
+    # start_period must outlast the entrypoint's boot upgrade — failures inside
+    # it are not counted, so an upgrade in progress never flaps the container.
+    # The `-u all` fallback path can exceed even 5 minutes on a large database;
+    # if that is normal for a deployment, raise HEALTHCHECK_START_PERIOD rather
+    # than lowering it. Docker's `timeout` must stay above HEALTHCHECK_TIMEOUT
+    # (the script's own HTTP timeout) or the script is killed before it answers.
+    healthcheck:
+      test: ["CMD", "python3", "/usr/local/bin/odoo-healthcheck.py"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: 15s
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: ${HEALTHCHECK_START_PERIOD:-300s}
     # No `ports:` on purpose — behind Traefik/nginx the proxy reaches odoo over
     # the docker network. For an inner-VPN box with no proxy, opt in via
     # docker-compose.dangerously-expose-odoo.yml (see DEPLOY.md). A `ports:`
