@@ -23,6 +23,18 @@ services:
     # via .env on bigger boxes, e.g. PG_SHARED_BUFFERS=2GB for ~8GB).
     # Rule of thumb: shared_buffers ~= 25% of the RAM given to Postgres,
     # effective_cache_size ~= 50-75%. Scale via .env per deployment.
+    #
+    # dynamic_shared_memory_type=sysv, not the `posix` default. Postgres creates
+    # a DSM *control segment* at postmaster start and EVERY backend attaches to
+    # it while connecting. Under `posix` that segment is a file in /dev/shm; if
+    # anything removes it while the postmaster keeps running, the postmaster goes
+    # on handing out the dead name and every new connection dies with
+    #   FATAL: could not open shared memory segment "/PostgreSQL.<n>":
+    #          No such file or directory
+    # — the same <n> over and over, until the postmaster is restarted. It cannot
+    # recover on its own. `sysv` keeps the segment in kernel IPC instead of a
+    # tmpfs file, so there is no file for anything to delete. Note this is NOT
+    # fixed by disabling parallel query: the control segment exists regardless.
     command: >
       postgres
       -c shared_buffers=${PG_SHARED_BUFFERS:-512MB}
@@ -30,6 +42,19 @@ services:
       -c work_mem=${PG_WORK_MEM:-8MB}
       -c maintenance_work_mem=${PG_MAINTENANCE_WORK_MEM:-64MB}
       -c max_connections=${PG_MAX_CONNECTIONS:-100}
+      -c dynamic_shared_memory_type=${PG_DYNAMIC_SHARED_MEMORY_TYPE:-sysv}
+      -c max_parallel_workers_per_gather=${PG_MAX_PARALLEL_WORKERS_PER_GATHER:-0}
+    # Docker's default /dev/shm is 64MB. Only used when PG_DYNAMIC_SHARED_MEMORY_TYPE
+    # is put back to `posix`, but tmpfs is lazily allocated so a larger size costs
+    # nothing until something writes to it.
+    shm_size: ${PG_SHM_SIZE:-256mb}
+    # Hard ceiling so a runaway query cannot get the HOST OOM killer involved.
+    # With no limit the kernel picks its own victim anywhere on the box — which
+    # is how a postmaster gets killed by a memory spike in a different stack.
+    deploy:
+      resources:
+        limits:
+          memory: ${DB_MEM_LIMIT:-2g}
     environment:
       POSTGRES_USER: ${DB_USER:-odoo}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-odoo}
@@ -69,6 +94,11 @@ services:
       DB_USER: ${DB_USER:-odoo}
       DB_PASSWORD: ${DB_PASSWORD:-odoo}
       DB_NAME: ${DB_NAME:-False}
+      # Per-PROCESS connection pool cap. Every http worker and every cron worker
+      # holds its own pool, so the cluster must have headroom for roughly
+      # (WORKERS + MAX_CRON_THREADS + 1) * DB_MAXCONN connections. Odoo's own
+      # default of 64 blows past PG_MAX_CONNECTIONS the moment workers > 1.
+      DB_MAXCONN: ${DB_MAXCONN:-16}
       DBFILTER: ${DBFILTER:-}   # host->db routing; multi-db needs (?i)^%d$ (DEPLOY.md)
       LIST_DB: ${LIST_DB:-False}
       ADMIN_PASSWD: ${ADMIN_PASSWD:-admin}
@@ -77,11 +107,23 @@ services:
       PROXY_MODE: ${PROXY_MODE:-True}
       WORKERS: ${WORKERS:-2}
       MAX_CRON_THREADS: ${MAX_CRON_THREADS:-1}
-      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-2147483648}
-      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-8589934592}
-      LIMIT_REQUEST: ${LIMIT_REQUEST:-1073741824}
-      LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-3600}
-      LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-7200}
+      # --- Worker recycling ---------------------------------------------------
+      # Defaults sized for a ~4GB share, i.e. (WORKERS + MAX_CRON_THREADS)
+      # * LIMIT_MEMORY_SOFT + ~200MB master must fit inside ODOO_MEM_LIMIT.
+      # Raise per product in .env; do not raise blindly on a small box.
+      #
+      # SOFT is the setting that actually controls memory: the worker finishes
+      # its current request and exits, and the master respawns it. HARD is an
+      # RLIMIT_AS crash guard, so it stays generous — Python's virtual address
+      # space runs well above RSS and a tight value turns big PDF/xlsx exports
+      # into MemoryError. LIMIT_REQUEST recycles on request count and is the
+      # backstop for slow leaks that never trip SOFT; Odoo's ~65k default is
+      # already high, and a value in the billions disables recycling outright.
+      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-805306368}      # 768 MiB
+      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-1610612736}     # 1.5 GiB
+      LIMIT_REQUEST: ${LIMIT_REQUEST:-8192}
+      LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-300}
+      LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-600}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Secrets at rest (OCA data_encryption). Generate the key with:
       #   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
@@ -106,6 +148,15 @@ services:
       HEALTHCHECK_DISABLE: ${HEALTHCHECK_DISABLE:-}
     volumes:
       - odoo-data:/var/lib/odoo
+    # Containment, not tuning: LIMIT_MEMORY_SOFT is what keeps workers small, and
+    # this is the wall for when that fails. Without it a leaking worker takes the
+    # whole host down and the kernel OOM killer picks the victim — which may well
+    # be another stack's postmaster rather than the process at fault.
+    # Keep it above (WORKERS + MAX_CRON_THREADS) * LIMIT_MEMORY_SOFT + ~200MB.
+    deploy:
+      resources:
+        limits:
+          memory: ${ODOO_MEM_LIMIT:-3g}
     expose:
       - "${HTTP_PORT:-8069}"
       - "${GEVENT_PORT:-8072}"
