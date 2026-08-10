@@ -115,6 +115,23 @@ IMAGE_TAG=latest
 # PG_WORK_MEM=32MB
 # PG_MAINTENANCE_WORK_MEM=256MB
 # PG_MAX_CONNECTIONS=100
+#
+# Container memory ceiling for Postgres. Set it on every shared host: without a
+# limit the kernel OOM killer, not Docker, decides who dies when the box runs
+# out — and it may pick this postmaster over the process that caused the spike.
+# DB_MEM_LIMIT=2g
+#
+# dynamic_shared_memory_type. Defaults to \`sysv\`, which keeps the DSM control
+# segment in kernel IPC. Under Postgres's own \`posix\` default it is a file in
+# /dev/shm, and if that file is removed while the postmaster keeps running,
+# EVERY new connection fails with
+#   FATAL: could not open shared memory segment "/PostgreSQL.<n>"
+# until Postgres is restarted — it cannot recover on its own, and disabling
+# parallel query does not help (the control segment exists regardless). Only
+# revert to posix if sysv hits a kernel shmall/shmmax limit.
+# PG_DYNAMIC_SHARED_MEMORY_TYPE=sysv
+# PG_SHM_SIZE=256mb                      # /dev/shm size; only used under posix
+# PG_MAX_PARALLEL_WORKERS_PER_GATHER=0   # Odoo gains little from parallel query
 DB_USER=odoo
 DB_PASSWORD=change-me-db
 # Single-db: set DB_NAME=<db> (entrypoint derives DBFILTER=^<db>$, host ignored).
@@ -141,7 +158,29 @@ GEVENT_PORT=8072
 PROXY_MODE=True
 WORKERS=2
 MAX_CRON_THREADS=1
+DB_MAXCONN=16
 LOG_LEVEL=info
+
+# --- Limits ------------------------------------------------------------------
+# Platform defaults are sized for a ~3GB share of the host and are baked into
+# platform/docker-compose.yml; uncomment to tune. The two budgets that must hold:
+#
+#   (WORKERS + MAX_CRON_THREADS) * LIMIT_MEMORY_SOFT + ~200MB  <=  ODOO_MEM_LIMIT
+#   (WORKERS + MAX_CRON_THREADS + 1) * DB_MAXCONN              <=  PG_MAX_CONNECTIONS
+#
+# LIMIT_MEMORY_SOFT does the real work: the worker finishes its request and
+# exits, and the master respawns it. LIMIT_MEMORY_HARD is an RLIMIT_AS crash
+# guard on virtual address space, which sits well above RSS, so keep it loose —
+# too tight and large PDF/xlsx exports die with MemoryError. LIMIT_REQUEST
+# recycles on request count and catches slow leaks that never trip SOFT; never
+# set it to an effectively-infinite value, that just disables recycling.
+# ODOO_MEM_LIMIT is the container wall for when all of the above fails.
+#LIMIT_MEMORY_SOFT=805306368     # 768 MiB
+#LIMIT_MEMORY_HARD=1610612736    # 1.5 GiB
+#LIMIT_REQUEST=8192
+#LIMIT_TIME_CPU=300
+#LIMIT_TIME_REAL=600
+#ODOO_MEM_LIMIT=3g
 
 # --- Module automation -------------------------------------------------------
 UPGRADE_DB=
