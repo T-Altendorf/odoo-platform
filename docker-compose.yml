@@ -108,19 +108,34 @@ services:
       WORKERS: ${WORKERS:-2}
       MAX_CRON_THREADS: ${MAX_CRON_THREADS:-1}
       # --- Worker recycling ---------------------------------------------------
-      # Defaults sized for a ~4GB share, i.e. (WORKERS + MAX_CRON_THREADS)
-      # * LIMIT_MEMORY_SOFT + ~200MB master must fit inside ODOO_MEM_LIMIT.
-      # Raise per product in .env; do not raise blindly on a small box.
+      # SOFT is the setting that actually controls memory: past it the worker
+      # finishes its request and exits, and the master respawns it.
       #
-      # SOFT is the setting that actually controls memory: the worker finishes
-      # its current request and exits, and the master respawns it. HARD is an
-      # RLIMIT_AS crash guard, so it stays generous — Python's virtual address
-      # space runs well above RSS and a tight value turns big PDF/xlsx exports
-      # into MemoryError. LIMIT_REQUEST recycles on request count and is the
-      # backstop for slow leaks that never trip SOFT; Odoo's ~65k default is
+      # THE FLOOR IS NOT ZERO. Odoo loads the registry in the master and THEN
+      # forks, and psutil counts shared pages, so a brand-new worker already
+      # reports the master's whole RSS as its own — roughly 500-700MB for a
+      # large addons set. Set SOFT below that and every worker dies before its
+      # first request, in an endless respawn loop that logs
+      #   Worker (<pid>) alive
+      #   Worker (<pid>) virtual memory limit (<n>) reached.
+      #   Worker (<pid>) exiting. request_count: 0
+      # Measure the floor before lowering this:
+      #   docker stats --no-stream   (or ps -o rss= -p <worker pid>)
+      # and leave real working headroom above it. Note the message says
+      # "virtual memory" but prints VMS while comparing RSS — size against RSS.
+      #
+      # Conversely, do NOT budget (WORKERS + MAX_CRON_THREADS) * SOFT of real
+      # RAM: those inherited pages are copy-on-write and shared between workers,
+      # so the sum badly overcounts. ODOO_MEM_LIMIT below is the honest number —
+      # a cgroup counts a shared page once.
+      #
+      # HARD is an RLIMIT_AS crash guard on virtual address space, which runs
+      # well above RSS, so it stays generous — a tight value turns big PDF/xlsx
+      # exports into MemoryError. LIMIT_REQUEST recycles on request count and is
+      # the backstop for slow leaks that never trip SOFT; Odoo's ~65k default is
       # already high, and a value in the billions disables recycling outright.
-      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-805306368}      # 768 MiB
-      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-1610612736}     # 1.5 GiB
+      LIMIT_MEMORY_SOFT: ${LIMIT_MEMORY_SOFT:-1342177280}     # 1.25 GiB
+      LIMIT_MEMORY_HARD: ${LIMIT_MEMORY_HARD:-2684354560}     # 2.5 GiB
       LIMIT_REQUEST: ${LIMIT_REQUEST:-8192}
       LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-300}
       LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-600}
@@ -152,7 +167,12 @@ services:
     # this is the wall for when that fails. Without it a leaking worker takes the
     # whole host down and the kernel OOM killer picks the victim — which may well
     # be another stack's postmaster rather than the process at fault.
-    # Keep it above (WORKERS + MAX_CRON_THREADS) * LIMIT_MEMORY_SOFT + ~200MB.
+    #
+    # This, not the per-worker limits, is the number to reconcile with the host's
+    # RAM: the cgroup counts each copy-on-write page shared between forked
+    # workers exactly once, so real usage sits far below WORKERS * SOFT.
+    # 3g comfortably holds WORKERS=2 + 1 cron for a large addons set. Watch
+    # `docker stats` for a week before trimming it.
     deploy:
       resources:
         limits:
@@ -211,3 +231,11 @@ volumes:
 # networks:
 #   dokploy-network:
 #     external: true
+
+
+Domain:              sciwieerp.de
+Record:              _acme-challenge.sciwieerp.de
+Type:                CNAME
+Content:             96bd190b-7394-4147-9bb5-007690258eb7.auth.acme-dns.io.
+Note:                Some DNS control panels add the final dot automatically.
+                     Only one is required.

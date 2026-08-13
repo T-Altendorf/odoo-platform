@@ -162,21 +162,35 @@ DB_MAXCONN=16
 LOG_LEVEL=info
 
 # --- Limits ------------------------------------------------------------------
-# Platform defaults are sized for a ~3GB share of the host and are baked into
-# platform/docker-compose.yml; uncomment to tune. The two budgets that must hold:
+# Platform defaults live in platform/docker-compose.yml; uncomment to tune.
 #
-#   (WORKERS + MAX_CRON_THREADS) * LIMIT_MEMORY_SOFT + ~200MB  <=  ODOO_MEM_LIMIT
-#   (WORKERS + MAX_CRON_THREADS + 1) * DB_MAXCONN              <=  PG_MAX_CONNECTIONS
+# The connection budget is a straight sum and must hold:
+#   (WORKERS + MAX_CRON_THREADS + 1) * DB_MAXCONN  <=  PG_MAX_CONNECTIONS
 #
-# LIMIT_MEMORY_SOFT does the real work: the worker finishes its request and
-# exits, and the master respawns it. LIMIT_MEMORY_HARD is an RLIMIT_AS crash
-# guard on virtual address space, which sits well above RSS, so keep it loose —
-# too tight and large PDF/xlsx exports die with MemoryError. LIMIT_REQUEST
-# recycles on request count and catches slow leaks that never trip SOFT; never
-# set it to an effectively-infinite value, that just disables recycling.
-# ODOO_MEM_LIMIT is the container wall for when all of the above fails.
-#LIMIT_MEMORY_SOFT=805306368     # 768 MiB
-#LIMIT_MEMORY_HARD=1610612736    # 1.5 GiB
+# Memory is NOT a straight sum. Odoo loads the registry in the master and then
+# forks, so workers share those pages copy-on-write and a cgroup counts them
+# once: real usage sits far below WORKERS * LIMIT_MEMORY_SOFT. Reconcile
+# ODOO_MEM_LIMIT with the host's RAM and let the per-worker limits be ceilings.
+#
+# LIMIT_MEMORY_SOFT does the real work: past it the worker finishes its request
+# and exits, and the master respawns it. It has a FLOOR — because psutil counts
+# shared pages, a newborn worker already reports the master's full RSS
+# (~500-700MB with a large addons set). Set SOFT under that and every worker
+# dies before its first request, looping on
+#   Worker (<pid>) alive / virtual memory limit reached / exiting, request_count: 0
+# (the message says "virtual memory" but prints VMS while comparing RSS).
+# Check the floor with \`docker stats --no-stream\` before lowering it.
+#
+# LIMIT_MEMORY_HARD is an RLIMIT_AS crash guard on virtual address space, which
+# sits well above RSS, so keep it loose — too tight and large PDF/xlsx exports
+# die with MemoryError. LIMIT_REQUEST recycles on request count and catches slow
+# leaks that never trip SOFT; never set it to an effectively-infinite value,
+# that just disables recycling.
+#
+# WORKERS must be >= 2 whatever the memory pressure: wkhtmltopdf calls back into
+# Odoo over HTTP, so a single worker deadlocks every PDF report.
+#LIMIT_MEMORY_SOFT=1342177280    # 1.25 GiB
+#LIMIT_MEMORY_HARD=2684354560    # 2.5 GiB
 #LIMIT_REQUEST=8192
 #LIMIT_TIME_CPU=300
 #LIMIT_TIME_REAL=600
