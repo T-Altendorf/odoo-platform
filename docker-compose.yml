@@ -150,6 +150,9 @@ services:
       UPGRADE_MODULES: ${UPGRADE_MODULES:-}
       ODOO_ADMIN_PASSWORD: ${ODOO_ADMIN_PASSWORD:-admin}
       UPGRADE_DB: ${UPGRADE_DB:-}
+      # Keep UI-set language formats across upgrades — base's res.lang.csv is a
+      # noupdate-less data file that -u base replays. See DEPLOY.md.
+      LANG_NOUPDATE: ${LANG_NOUPDATE:-1}
       DEBUG: ${DEBUG:-0}
       DEBUGPY_PORT: ${DEBUGPY_PORT:-5678}
       DEBUGPY_WAIT: ${DEBUGPY_WAIT:-}

@@ -475,6 +475,41 @@ UPGRADE_DB=                      # skip upgrades entirely (fast restart)
 INIT_DB=NewClient                # create a fresh db (one-shot, then clear)
 ```
 
+### `LANG_NOUPDATE` — keep language settings across upgrades
+
+Odoo ships its language defaults in `odoo/addons/base/data/res.lang.csv`, listed
+in `base`'s `data`. CSV data files carry no `noupdate` flag, so they import with
+`noupdate=False` and are **replayed on every `base` upgrade**. Since `-u all`
+includes `base` — as does `module_auto_update`'s first pass and its `-u all`
+fallback — a redeploy silently resets Settings → Translations → Languages:
+
+```
+date_format   %d.%m.%Y  ->  %m/%d/%Y
+```
+
+and likewise `time_format`, `decimal_point`, `thousands_sep`, `grouping` and
+`week_start`. Nothing in the UI reports it, so it reads as a random redeploy
+gremlin. It is not: it is `base` reasserting upstream defaults.
+
+The entrypoint fixes this before each upgrade by setting `noupdate = true` on the
+`res.lang` rows in `ir_model_data`. `models._load_records()` skips a record whose
+external id is flagged `noupdate`, so the CSV re-import becomes a no-op **for
+`res.lang` only** — every other module's data keeps updating as before. The step
+is plain SQL (no registry load, so it cannot trip over a not-yet-applied schema)
+and idempotent: it reports a count on the first boot and does nothing after.
+
+On by default. The trade-off is that genuine upstream corrections to language
+data stop landing too — that is the point, and it is the standard Odoo answer for
+customised core data.
+
+```bash
+LANG_NOUPDATE=1                  # default: your language settings stick
+LANG_NOUPDATE=0                  # opt out; take upstream's values on every -u base
+```
+
+Set the format once in the UI after the first boot with this enabled. It applies
+to the dbs named in `INIT_DB` and `UPGRADE_DB`.
+
 ## Health probe
 
 The `odoo` service reports a real health status to `docker ps`. It is deliberately

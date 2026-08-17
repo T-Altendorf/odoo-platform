@@ -71,6 +71,13 @@ done
 : "${UPGRADE_DB:=}"
 : "${INIT_DB:=}"
 
+# Keep UI edits to Languages (date format, separators, week start) across
+# upgrades. Odoo ships those defaults in base/data/res.lang.csv, a plain data
+# file with no noupdate flag, so every `-u base` — and `-u all` includes base —
+# re-imports it and overwrites whatever was set in Settings > Languages. See
+# the LANG_NOUPDATE block below. Set LANG_NOUPDATE=0 to track upstream instead.
+: "${LANG_NOUPDATE:=1}"
+
 # Debugger (debugpy). DEBUG=1 -> run Odoo under debugpy on DEBUGPY_PORT.
 # DEBUGPY_WAIT=1 -> block until the IDE attaches.
 : "${DEBUG:=0}"
@@ -173,6 +180,45 @@ module_installed() {
         "$1" 2>/dev/null | grep -q 1
 }
 
+# pin_lang_records <db> — flip noupdate on the res.lang external ids so a module
+# upgrade stops reverting them.
+#
+# WHY: Odoo's language defaults live in odoo/addons/base/data/res.lang.csv,
+# listed in base's `data` (not `demo`, and CSV files carry no noupdate flag), so
+# they are imported with noupdate=False. On every `-u base` — and `-u all`
+# includes base, as does module_auto_update's first pass and its -u all fallback
+# — the CSV is replayed and base.lang_en's date_format goes back to %m/%d/%Y,
+# silently undoing Settings > Translations > Languages. Nothing in the UI hints
+# at this, which is why it reads as a random redeploy gremlin.
+#
+# THE FIX: models._load_records() skips a row when its external id is already
+# marked noupdate (`if not (update and d_noupdate)`), so setting noupdate on the
+# ir_model_data rows makes the re-import a no-op for res.lang and ONLY res.lang.
+# Every other module's data keeps updating normally.
+#
+# Plain SQL on purpose: no registry load, so this cannot fail on a schema that
+# the upgrade below has not applied yet (see _mau_call for how that bites).
+# It is also idempotent — the WHERE clause matches nothing once pinned.
+#
+# TRADE-OFF: genuine upstream corrections to language data stop landing too.
+# That is the point, and it is the standard Odoo answer for customised core
+# data. Set LANG_NOUPDATE=0 to opt out and take upstream's values instead.
+pin_lang_records() {
+    local _n
+    # Wrapped in a CTE so the statement is a SELECT and -tA yields exactly one
+    # number: a bare `UPDATE ... RETURNING` also prints psql's "UPDATE n" tag.
+    _n="$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
+        -tAc "WITH pinned AS (
+                  UPDATE ir_model_data SET noupdate = true
+                   WHERE model = 'res.lang' AND noupdate = false
+               RETURNING 1
+              ) SELECT count(*) FROM pinned" "$1" 2>/dev/null || true)"
+    if [ "${_n:-0}" -gt 0 ]; then
+        echo "[entrypoint] LANG_NOUPDATE: pinned ${_n} res.lang record(s) in '$1' —" \
+             "Settings > Languages now survives upgrades"
+    fi
+}
+
 # _mau_call <db> <method> — call an ir.module.module method with Odoo as a
 # library.
 #
@@ -257,6 +303,19 @@ with Registry(db).cursor() as cr:
     print(f"[entrypoint] admin password set for {admin.login}")
 PYEOF
         fi
+    done
+fi
+
+# LANG_NOUPDATE: pin the language records BEFORE the upgrade below, so the very
+# boot that would have reverted the date format is already protected. Covers the
+# INIT_DB dbs too — base is installed by then, so the external ids exist.
+if [ "$LANG_NOUPDATE" != "0" ] && [ "$LANG_NOUPDATE" != "False" ]; then
+    for _db in $(echo "${INIT_DB},${UPGRADE_DB}" | tr ',' ' '); do
+        # `[ a ] || [ b ] && continue` would abort the boot under `set -e` on the
+        # pass where neither holds — the compound exits 1. Use a case instead.
+        case "$_db" in ""|False) continue ;; esac
+        db_exists "$_db" || continue
+        pin_lang_records "$_db"
     done
 fi
 

@@ -201,6 +201,11 @@ UPGRADE_DB=
 UPGRADE_MODULES=
 INSTALL_MODULES=
 INIT_DB=
+# Keep Settings > Translations > Languages (date format, separators, week start)
+# across upgrades. base ships those defaults in a CSV data file with no noupdate
+# flag, so every -u base resets them. On by default; 0 tracks upstream instead.
+# See DEPLOY.md "LANG_NOUPDATE".
+#LANG_NOUPDATE=1
 
 # --- Health probe ------------------------------------------------------------
 # Sane defaults are baked into platform/docker-compose.yml; uncomment to tune.
