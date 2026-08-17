@@ -231,11 +231,3 @@ volumes:
 # networks:
 #   dokploy-network:
 #     external: true
-
-
-Domain:              sciwieerp.de
-Record:              _acme-challenge.sciwieerp.de
-Type:                CNAME
-Content:             96bd190b-7394-4147-9bb5-007690258eb7.auth.acme-dns.io.
-Note:                Some DNS control panels add the final dot automatically.
-                     Only one is required.
