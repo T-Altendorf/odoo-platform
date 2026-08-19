@@ -41,6 +41,13 @@ fi
 : "${LIMIT_REQUEST:=1073741824}"
 : "${LIMIT_TIME_CPU:=3600}"
 : "${LIMIT_TIME_REAL:=7200}"
+# Wall-clock cap for CRON jobs, separate from the HTTP one above. Odoo's own
+# default (-1) means "reuse limit_time_real", which is sized for a web request
+# and is far too tight for a nightly job: a backup or a big recompute that runs
+# past it is killed mid-transaction, the work is rolled back, and ir_cron.nextcall
+# is never advanced — so the job stays permanently overdue and every cron behind
+# it starves. Set a generous value (e.g. 1800) or 0 for no limit.
+: "${LIMIT_TIME_REAL_CRON:=-1}"
 
 : "${LOG_LEVEL:=info}"
 
@@ -94,7 +101,7 @@ done
 export DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME DB_MAXCONN DBFILTER LIST_DB \
        ADMIN_PASSWD DATA_DIR HTTP_PORT GEVENT_PORT PROXY_MODE WORKERS \
        MAX_CRON_THREADS LIMIT_MEMORY_SOFT LIMIT_MEMORY_HARD LIMIT_REQUEST \
-       LIMIT_TIME_CPU LIMIT_TIME_REAL LOG_LEVEL ADDONS_PATH
+       LIMIT_TIME_CPU LIMIT_TIME_REAL LIMIT_TIME_REAL_CRON LOG_LEVEL ADDONS_PATH
 
 # --- Render config -----------------------------------------------------------
 envsubst < /etc/odoo/odoo.conf.template > "$ODOO_RC"

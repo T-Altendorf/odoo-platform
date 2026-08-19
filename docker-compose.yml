@@ -139,6 +139,12 @@ services:
       LIMIT_REQUEST: ${LIMIT_REQUEST:-8192}
       LIMIT_TIME_CPU: ${LIMIT_TIME_CPU:-300}
       LIMIT_TIME_REAL: ${LIMIT_TIME_REAL:-600}
+      # Cron jobs get their OWN wall-clock cap. Odoo's default (-1) reuses
+      # LIMIT_TIME_REAL, which is sized for an HTTP request — a nightly backup
+      # or recompute that overruns it is killed mid-transaction and rolled back,
+      # so ir_cron.nextcall never advances and the job is stuck overdue forever,
+      # starving every cron queued behind it. 0 = no limit.
+      LIMIT_TIME_REAL_CRON: ${LIMIT_TIME_REAL_CRON:--1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Secrets at rest (OCA data_encryption). Generate the key with:
       #   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
